@@ -1,0 +1,266 @@
+{
+ "products": [
+  {
+   "id": 796768186,
+   "__sort": 195694,
+   "ksort": 126000,
+   "root": 699381042,
+   "kindId": 2,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "белый",
+     "id": 16777215
+    },
+    {
+     "name": "черный",
+     "id": 0
+    }
+   ],
+   "subjectId": 284,
+   "subjectParentId": 1,
+   "semanticId": [
+    6,
+    8,
+    132,
+    349,
+    205,
+    739,
+    6
+   ],
+   "name": "Костюм горничной аниме",
+   "entity": "",
+   "matchId": 650258940,
+   "supplier": "K A.RU",
+   "supplierId": 250079242,
+   "supplierRating": 4.7,
+   "supplierFlags": 6080,
+   "pics": 8,
+   "picsUpdate": 0,
+   "rating": 4,
+   "reviewRating": 4.4,
+   "feedbacks": 51,
+   "volume": 20,
+   "weight": 0.4,
+   "viewFlags": 1572864,
+   "sizes": [
+    {
+     "name": "44",
+     "origName": "M",
+     "rank": 629923,
+     "optionId": 1187603919,
+     "wh": 218804,
+     "time1": 120,
+     "time2": 51,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 649000,
+      "product": 123800,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 155189250
+    }
+   ],
+   "totalQuantity": 6,
+   "time1": 120,
+   "time2": 51,
+   "wh": 218804,
+   "dtype": 6614249635841,
+   "ndtype": 197121,
+   "dtypeMask": 1,
+   "dist": 122
+  },
+  {
+   "id": 683436336,
+   "__sort": 182161,
+   "ksort": 111450,
+   "root": 699381042,
+   "kindId": 2,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "черный",
+     "id": 0
+    }
+   ],
+   "subjectId": 284,
+   "subjectParentId": 1,
+   "semanticId": [
+    6,
+    8,
+    132,
+    349,
+    205,
+    739,
+    40
+   ],
+   "name": "Косплей аниме костюм",
+   "entity": "",
+   "matchId": 656572297,
+   "supplier": "K A.RU",
+   "supplierId": 250079242,
+   "supplierRating": 4.7,
+   "supplierFlags": 6080,
+   "pics": 7,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 4.9,
+   "feedbacks": 40,
+   "isAdult": true,
+   "volume": 59,
+   "weight": 0.25,
+   "viewFlags": 5767184,
+   "sizes": [
+    {
+     "name": "42-44",
+     "origName": "S",
+     "rank": 591310,
+     "optionId": 922475922,
+     "wh": 218804,
+     "time1": 120,
+     "time2": 51,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 260100,
+      "product": 105700,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 155189250
+    },
+    {
+     "name": "44-46",
+     "origName": "M",
+     "rank": 644423,
+     "optionId": 922475923,
+     "wh": 218804,
+     "time1": 120,
+     "time2": 51,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 260100,
+      "product": 105700,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 155189250
+    },
+    {
+     "name": "46-48",
+     "origName": "L",
+     "rank": 696849,
+     "optionId": 922475924,
+     "wh": 218804,
+     "time1": 120,
+     "time2": 51,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 260100,
+      "product": 105700,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 155189250
+    }
+   ],
+   "totalQuantity": 38,
+   "time1": 120,
+   "time2": 51,
+   "wh": 218804,
+   "dtype": 6614249635841,
+   "ndtype": 197121,
+   "dtypeMask": 1,
+   "dist": 122
+  },
+  {
+   "id": 847901227,
+   "__sort": 132174,
+   "ksort": 77009,
+   "root": 1008241128,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "синий",
+     "id": 255
+    }
+   ],
+   "subjectId": 849,
+   "subjectParentId": 1590,
+   "semanticId": [
+    167,
+    102,
+    75,
+    639,
+    985,
+    2121,
+    356
+   ],
+   "name": "Подарочный набор для чаепития и чайной церемонии",
+   "entity": "",
+   "matchId": 532348299,
+   "supplier": "K A.RU",
+   "supplierId": 250079242,
+   "supplierRating": 4.7,
+   "supplierFlags": 6080,
+   "pics": 8,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 4.8,
+   "feedbacks": 5,
+   "volume": 88,
+   "weight": 1.5,
+   "viewFlags": 1572864,
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "rank": 0,
+     "optionId": 1274802905,
+     "wh": 218804,
+     "time1": 120,
+     "time2": 51,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 650300,
+      "product": 276300,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 155189250
+    }
+   ],
+   "totalQuantity": 3,
+   "time1": 120,
+   "time2": 51,
+   "wh": 218804,
+   "dtype": 6614249635841,
+   "ndtype": 197121,
+   "dtypeMask": 1,
+   "dist": 122
+  }
+ ],
+ "total": 89
+}

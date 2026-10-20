@@ -1,0 +1,222 @@
+{
+ "products": [
+  {
+   "id": 334082543,
+   "__sort": 11990,
+   "ksort": 0,
+   "root": 208981241,
+   "kindId": 0,
+   "brand": "ARDOR GAMING",
+   "brandId": 310604878,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "белый",
+     "id": 16777215
+    }
+   ],
+   "subjectId": 742,
+   "subjectParentId": 6237,
+   "semanticId": [
+    226,
+    49,
+    124,
+    125,
+    321,
+    191,
+    279
+   ],
+   "name": "Коврик Glass (L)",
+   "entity": "",
+   "matchId": 204767116,
+   "supplier": "GBS Техника",
+   "supplierId": 4099240,
+   "supplierRating": 4.8,
+   "supplierFlags": 274368,
+   "pics": 8,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 5,
+   "feedbacks": 1,
+   "panelPromoId": 1057123,
+   "volume": 20,
+   "weight": 0.27,
+   "viewFlags": 1400960,
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "rank": 0,
+     "optionId": 499418254,
+     "wh": 303899,
+     "time1": 35,
+     "time2": 74,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 701000,
+      "product": 361100,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 2550136832
+    }
+   ],
+   "totalQuantity": 8,
+   "time1": 35,
+   "time2": 74,
+   "wh": 303899,
+   "dtype": 6614249635841,
+   "ndtype": 197121,
+   "dtypeMask": 1,
+   "dist": 1073
+  },
+  {
+   "id": 594826793,
+   "__sort": 8633,
+   "ksort": 0,
+   "root": 616320665,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "фиолетовый",
+     "id": 15631086
+    }
+   ],
+   "subjectId": 742,
+   "subjectParentId": 6237,
+   "semanticId": [
+    226,
+    49,
+    92,
+    129,
+    219,
+    35,
+    544
+   ],
+   "name": "стеклянный коврик для мыши 450×400MM",
+   "entity": "",
+   "matchId": 392170090,
+   "supplier": "KA KA",
+   "supplierId": 4529030,
+   "supplierRating": 4.7,
+   "supplierFlags": 3072,
+   "pics": 7,
+   "picsUpdate": 0,
+   "rating": 4,
+   "reviewRating": 4,
+   "feedbacks": 3,
+   "volume": 114,
+   "weight": 2,
+   "viewFlags": 1671296,
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "rank": 0,
+     "optionId": 811078853,
+     "wh": 218804,
+     "time1": 120,
+     "time2": 51,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 650300,
+      "product": 276300,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 2302672896
+    }
+   ],
+   "totalQuantity": 10,
+   "time1": 120,
+   "time2": 51,
+   "wh": 218804,
+   "dtype": 6614249635841,
+   "ndtype": 197121,
+   "dtypeMask": 1,
+   "dist": 122
+  },
+  {
+   "id": 600232826,
+   "__sort": 8536,
+   "ksort": 0,
+   "root": 616320665,
+   "kindId": 0,
+   "brand": "",
+   "brandId": 0,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "черный",
+     "id": 0
+    }
+   ],
+   "subjectId": 742,
+   "subjectParentId": 6237,
+   "semanticId": [
+    226,
+    49,
+    92,
+    129,
+    216,
+    978,
+    573
+   ],
+   "name": "стеклянный коврик для мыши 450×400MM",
+   "entity": "",
+   "matchId": 393542269,
+   "supplier": "KA KA",
+   "supplierId": 4529030,
+   "supplierRating": 4.7,
+   "supplierFlags": 3072,
+   "pics": 7,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 4.9,
+   "feedbacks": 9,
+   "volume": 114,
+   "weight": 2,
+   "viewFlags": 1671296,
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "rank": 0,
+     "optionId": 817465430,
+     "wh": 218804,
+     "time1": 120,
+     "time2": 51,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 650300,
+      "product": 276300,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 2302672896
+    }
+   ],
+   "totalQuantity": 14,
+   "time1": 120,
+   "time2": 51,
+   "wh": 218804,
+   "dtype": 6614249635841,
+   "ndtype": 197121,
+   "dtypeMask": 1,
+   "dist": 122
+  }
+ ],
+ "total": 32585
+}

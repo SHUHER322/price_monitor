@@ -5,10 +5,18 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class SizeInfo:
     """Один размер товара (у одежды и обуви их несколько, у техники обычно один)."""
-    name: str              # "M", "42", "" — если размера нет
+    name: str              # "M", "42-44", "" — если размера нет
     price: int | None      # цена в копейках; None — размер закончился
     old_price: int | None  # цена до скидки, в копейках
-    quantity: int          # сколько штук этого размера в наличии
+    # Сколько штук в наличии. None — неизвестно: в списках (поиск, магазин)
+    # WB не отдаёт остатки по размерам, только в карточке одного товара
+    quantity: int | None
+
+    @property
+    def in_stock(self) -> bool:
+        # Закончившийся размер WB показывает без цены — это работает и там,
+        # где количество неизвестно
+        return self.price is not None and self.quantity != 0
 
 
 @dataclass(frozen=True)
@@ -22,6 +30,12 @@ class ProductInfo:
     old_price: int | None  # цена до скидки у того же размера, в копейках
     quantity: int          # сколько штук в наличии всего (0 — нет в наличии)
     sizes: tuple[SizeInfo, ...] = ()  # по размерам; кортеж, т.к. объект неизменяемый
+    # Для анализа рынка: кто продаёт и как товар оценивают
+    seller: str = ""
+    seller_id: str = ""
+    brand: str = ""
+    rating: float | None = None  # средняя оценка по отзывам, 0–5
+    feedbacks: int = 0           # количество отзывов
 
     @property
     def in_stock(self) -> bool:

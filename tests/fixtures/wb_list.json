@@ -1,0 +1,216 @@
+{
+ "products": [
+  {
+   "id": 10653094,
+   "sort": 16766,
+   "root": 8067360,
+   "kindId": 0,
+   "brand": "Messor",
+   "brandId": 53324,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "голубой",
+     "id": 11393254
+    }
+   ],
+   "subjectId": 1296,
+   "subjectParentId": 1590,
+   "semanticId": [
+    167,
+    102,
+    327,
+    1011,
+    654,
+    9669,
+    58
+   ],
+   "name": "Силиконовая скалка для раскатки теста и мастики 41 см",
+   "entity": "",
+   "matchId": 985860363,
+   "supplier": "Messor",
+   "supplierId": 45572,
+   "supplierRating": 4.9,
+   "supplierFlags": 274370,
+   "pics": 9,
+   "picsUpdate": 2,
+   "rating": 5,
+   "reviewRating": 4.9,
+   "feedbacks": 3108,
+   "panelPromoId": 1057123,
+   "volume": 10,
+   "weight": 0.325,
+   "viewFlags": 532625,
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "rank": 0,
+     "optionId": 34293273,
+     "wh": 4554814135,
+     "time1": 2,
+     "time2": 48,
+     "dtype": 6614249635848,
+     "ndtype": 197124,
+     "price": {
+      "basic": 115200,
+      "product": 44900,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 402653184
+    }
+   ],
+   "totalQuantity": 38,
+   "time1": 2,
+   "time2": 48,
+   "wh": 4554814135,
+   "dtype": 6614249635848,
+   "ndtype": 197124,
+   "dist": 102
+  },
+  {
+   "id": 11840282,
+   "sort": 16132,
+   "root": 8888562,
+   "kindId": 0,
+   "brand": "www.skalochki.com",
+   "brandId": 66262,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "бежевый",
+     "id": 16119260
+    }
+   ],
+   "subjectId": 1296,
+   "subjectParentId": 1590,
+   "semanticId": [
+    167,
+    102,
+    327,
+    1011,
+    654,
+    3690,
+    22
+   ],
+   "name": "Скалка для печения с узорами",
+   "entity": "",
+   "matchId": 124837692,
+   "supplier": "Скалочки",
+   "supplierId": 53875,
+   "supplierRating": 5,
+   "supplierFlags": 274402,
+   "pics": 5,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 4.9,
+   "feedbacks": 1818,
+   "panelPromoId": 1057123,
+   "volume": 19,
+   "weight": 0.23,
+   "viewFlags": 1581056,
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "rank": 0,
+     "optionId": 37276744,
+     "wh": 6335645095,
+     "time1": 3,
+     "time2": 57,
+     "dtype": 6614249635848,
+     "ndtype": 197124,
+     "price": {
+      "basic": 124900,
+      "product": 66700,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 423624704
+    }
+   ],
+   "totalQuantity": 38,
+   "time1": 3,
+   "time2": 57,
+   "wh": 6335645095,
+   "dtype": 6614249635848,
+   "ndtype": 197124,
+   "dist": 276
+  },
+  {
+   "id": 12930315,
+   "sort": 14383,
+   "root": 9695481,
+   "kindId": 0,
+   "brand": "Всё для дома",
+   "brandId": 34130,
+   "siteBrandId": 0,
+   "colors": [
+    {
+     "name": "белый",
+     "id": 16777215
+    }
+   ],
+   "subjectId": 1296,
+   "subjectParentId": 1590,
+   "semanticId": [
+    167,
+    102,
+    327,
+    1011,
+    654,
+    9668,
+    34
+   ],
+   "name": "Скалка деревянная 43 см",
+   "entity": "",
+   "matchId": 525364198,
+   "supplier": "Makeuphome",
+   "supplierId": 40111,
+   "supplierRating": 4.9,
+   "supplierFlags": 274368,
+   "pics": 5,
+   "picsUpdate": 0,
+   "rating": 5,
+   "reviewRating": 4.8,
+   "feedbacks": 237,
+   "volume": 17,
+   "weight": 0.3,
+   "viewFlags": 532608,
+   "sizes": [
+    {
+     "name": "",
+     "origName": "0",
+     "rank": 0,
+     "optionId": 39684968,
+     "wh": 212032,
+     "time1": 22,
+     "time2": 62,
+     "dtype": 6614249635841,
+     "ndtype": 197121,
+     "price": {
+      "basic": 55900,
+      "product": 40700,
+      "logistics": 0,
+      "return": 0,
+      "cashback": 0,
+      "wallet": 0
+     },
+     "saleConditions": 134217728
+    }
+   ],
+   "totalQuantity": 24,
+   "time1": 22,
+   "time2": 62,
+   "wh": 212032,
+   "dtype": 6614249635841,
+   "ndtype": 197121,
+   "dist": 141
+  }
+ ]
+}
