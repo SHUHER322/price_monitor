@@ -17,6 +17,7 @@ class Config:
     check_interval_hours: int   # как часто проверять цены
     price_drop_percent: float   # уведомлять, если цена упала больше чем на столько %
     search_limit: int           # сколько товаров брать из поиска
+    seller_limit: int           # сколько товаров магазина отслеживать (у крупных их тысячи)
     max_trackings: int          # сколько отслеживаний можно одному пользователю
     wb_dest: str                # регион доставки WB: от него зависят цены и наличие
     timezone: ZoneInfo          # в каком поясе показывать время пользователю
@@ -83,6 +84,7 @@ def load_config(use_dotenv: bool = True) -> Config:
         check_interval_hours=_parse_int("CHECK_INTERVAL_HOURS", 6, minimum=1),
         price_drop_percent=_parse_percent("PRICE_DROP_PERCENT", 5),
         search_limit=_parse_int("SEARCH_LIMIT", 30, minimum=1),
+        seller_limit=_parse_int("SELLER_LIMIT", 500, minimum=1),
         max_trackings=_parse_int("MAX_TRACKINGS", 20, minimum=1),
         wb_dest=os.getenv("WB_DEST", "1259570991").strip(),
         timezone=_parse_timezone(os.getenv("TIMEZONE", "Asia/Tomsk")),

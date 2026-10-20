@@ -4,7 +4,7 @@ import pytest
 from app.config import load_config
 
 ENV_NAMES = ["BOT_TOKEN", "ALLOWED_USERS", "DB_PATH", "DATA_DIR", "CHECK_INTERVAL_HOURS",
-             "PRICE_DROP_PERCENT", "SEARCH_LIMIT", "MAX_TRACKINGS", "WB_DEST", "TIMEZONE"]
+             "PRICE_DROP_PERCENT", "SEARCH_LIMIT", "SELLER_LIMIT", "MAX_TRACKINGS", "WB_DEST", "TIMEZONE"]
 
 
 @pytest.fixture
@@ -25,6 +25,7 @@ def test_defaults(env):
     assert config.check_interval_hours == 6
     assert config.price_drop_percent == 5
     assert config.search_limit == 30
+    assert config.seller_limit == 500
     assert config.max_trackings == 20
     assert str(config.timezone) == "Asia/Tomsk"
 
