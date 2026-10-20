@@ -1,0 +1,100 @@
+{
+  "products": [
+    {
+      "id": 683146715,
+      "root": 699139027,
+      "kindId": 0,
+      "brand": "",
+      "brandId": 0,
+      "siteBrandId": 0,
+      "colors": [
+        {
+          "name": "фиолетовый",
+          "id": 15631086
+        }
+      ],
+      "subjectId": 742,
+      "subjectParentId": 6237,
+      "name": "PADSMITH стеклянный коврик для мыши 450×400MM",
+      "entity": "",
+      "matchId": 392170090,
+      "supplier": "K A.RU",
+      "supplierId": 250079242,
+      "supplierRating": 4.7,
+      "supplierFlags": 6080,
+      "pics": 8,
+      "picsUpdate": 0,
+      "rating": 5,
+      "reviewRating": 5,
+      "feedbacks": 4,
+      "volume": 114,
+      "weight": 2,
+      "viewFlags": 1671312,
+      "promotions": [
+        183297,
+        1000058,
+        1003057,
+        1006716,
+        1007156,
+        1008961,
+        1013974,
+        1017677,
+        1021923,
+        1022638,
+        1022645,
+        1026650,
+        1032505,
+        1032539,
+        1038846,
+        1039748,
+        1050848,
+        1055321,
+        1056991,
+        1059236,
+        1062397
+      ],
+      "sizes": [
+        {
+          "name": "",
+          "origName": "0",
+          "rank": 0,
+          "optionId": 921988216,
+          "stocks": [
+            {
+              "wh": 218804,
+              "dtype": 6614249635841,
+              "ndtype": 197121,
+              "dist": 122,
+              "qty": 11,
+              "priority": 49327,
+              "time1": 120,
+              "time2": 51
+            }
+          ],
+          "time1": 120,
+          "time2": 51,
+          "wh": 218804,
+          "dtype": 6614249635841,
+          "ndtype": 197121,
+          "dist": 122,
+          "price": {
+            "basic": 650300,
+            "product": 276300,
+            "logistics": 0,
+            "return": 0,
+            "cashback": 0,
+            "wallet": 0
+          },
+          "saleConditions": 2302672898
+        }
+      ],
+      "totalQuantity": 11,
+      "time1": 120,
+      "time2": 51,
+      "wh": 218804,
+      "dtype": 6614249635841,
+      "ndtype": 197121,
+      "dist": 122
+    }
+  ]
+}
