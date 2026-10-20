@@ -101,3 +101,52 @@ def test_snapshot_with_sizes(db):
 def test_empty_lists(db):
     assert run(db.last_prices("wb", [])) == {}
     run(db.save_snapshot([]))   # не падает
+
+
+# --- выгрузка: товары отслеживания с местами ---
+
+def test_tracking_rows_in_order_with_latest_price(db):
+    tracking_id, _ = run(db.add_tracking(111, "search", "wb", "коврик", "коврик"))
+    run(db.save_snapshot([product("1", 300000), product("2", 100000), product("3", 50000)],
+                         "2026-10-20 10:00:00"))
+    run(db.update_tracking_items(tracking_id, "wb", ["2", "1", "3"]))   # места: 2, 1, 3
+    run(db.save_snapshot([product("1", 276300)], "2026-10-20 16:00:00"))
+    rows = run(db.tracking_rows(tracking_id))
+    assert [(r.position, r.article) for r in rows] == [(1, "2"), (2, "1"), (3, "3")]
+    assert rows[1].price == 276300          # у товара 1 — свежая цена, а не первая
+    assert rows[0].seller == "K A.RU"
+
+
+def test_dropped_from_top_not_exported(db):
+    tracking_id, _ = run(db.add_tracking(111, "search", "wb", "коврик", "коврик"))
+    run(db.save_snapshot([product("1"), product("2"), product("3")]))
+    run(db.update_tracking_items(tracking_id, "wb", ["1", "2"]))
+    import time; time.sleep(1.1)            # следующая проверка — на секунду позже
+    run(db.update_tracking_items(tracking_id, "wb", ["3", "1"]))   # «2» выпал из топа
+    rows = run(db.tracking_rows(tracking_id))
+    assert [(r.position, r.article) for r in rows] == [(1, "3"), (2, "1")]
+
+
+def test_migration_adds_position(tmp_path):
+    # База «старого образца» — без столбца position, как у созданной до обновления
+    import sqlite3
+    path = str(tmp_path / "old.db")
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE tracking_items (tracking_id INTEGER NOT NULL, source TEXT NOT NULL, "
+                "article TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, "
+                "PRIMARY KEY (tracking_id, source, article))")
+    con.execute("INSERT INTO tracking_items VALUES (1, 'wb', '42', 'x', 'x')")
+    con.commit()
+    con.close()
+    run(Database(path).init())
+    con = sqlite3.connect(path)
+    columns = {row[1] for row in con.execute("PRAGMA table_info(tracking_items)")}
+    assert "position" in columns
+    assert con.execute("SELECT article FROM tracking_items").fetchall() == [("42",)]  # данные целы
+    con.close()
+
+
+def test_get_tracking_only_own(db):
+    tracking_id, _ = run(db.add_tracking(111, "seller", "wb", "250079242", "K A.RU"))
+    assert run(db.get_tracking(111, tracking_id)).title == "K A.RU"
+    assert run(db.get_tracking(222, tracking_id)) is None

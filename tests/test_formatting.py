@@ -2,7 +2,8 @@
 import pytest
 
 from app.db import PricePoint, Tracking
-from app.formatting import parse_rubles, product_card, tracking_line, trackings_text
+from app.formatting import (parse_rubles, product_card, stock_text, tracking_line,
+                            trackings_text)
 from app.sources.base import ProductInfo, SizeInfo
 
 
@@ -57,3 +58,9 @@ def test_card_with_sizes():
     card = product_card(info)
     assert "• S: 1 057 ₽ (3 шт.)" in card
     assert "• M: — (нет)" in card
+
+
+@pytest.mark.parametrize("quantity, text", [(0, "нет"), (1, "1 шт."), (42, "42 шт."),
+                                            (43, "43+ шт.")])
+def test_stock_text(quantity, text):
+    assert stock_text(quantity) == text

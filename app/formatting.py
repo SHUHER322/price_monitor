@@ -5,6 +5,7 @@ import re
 
 from .db import PricePoint, Tracking
 from .sources.base import ProductInfo, format_price
+from .sources.wb import STOCK_CAP
 
 KIND_ICONS = {"product": "🛍", "seller": "🏪", "search": "🔍"}
 MAX_RUBLES = 10_000_000  # больше — скорее опечатка
@@ -28,6 +29,13 @@ def parse_rubles(text: str) -> int | None:
     return round(rubles * 100)
 
 
+def stock_text(quantity: int) -> str:
+    """11 → '11 шт.', 43 → '43+ шт.' (WB не показывает больше), 0 → 'нет'."""
+    if not quantity:
+        return "нет"
+    return f"{quantity}+ шт." if quantity >= STOCK_CAP else f"{quantity} шт."
+
+
 def esc(text: str) -> str:
     """Экранировать текст для HTML-разметки Telegram (как в lead_bot):
     название товара с символом < иначе сломает сообщение."""
@@ -41,12 +49,12 @@ def product_card(info: ProductInfo) -> str:
     if info.has_sizes:
         for s in info.sizes:
             if s.quantity is not None:
-                stock = f"{s.quantity} шт." if s.quantity else "нет"
+                stock = stock_text(s.quantity)
             else:
                 stock = "есть" if s.in_stock else "нет"
             lines.append(f"• {esc(s.name)}: {format_price(s.price)} ({stock})")
     else:
-        stock = f"{info.quantity} шт." if info.in_stock else "нет в наличии"
+        stock = stock_text(info.quantity) if info.in_stock else "нет в наличии"
         lines.append(f"Цена: <b>{format_price(info.price)}</b>, в наличии: {stock}")
     return "\n".join(lines)
 
@@ -84,5 +92,5 @@ def trackings_text(trackings: list[Tracking], last_prices: dict[str, PricePoint]
     for i, t in enumerate(trackings, 1):
         last = last_prices.get(t.target) if t.kind == "product" else None
         lines.append(tracking_line(i, t, last))
-    lines.append("\nЧтобы убрать, нажмите кнопку с номером.")
+    lines.append("\n📊 — выгрузить магазин или поиск в Excel, 🗑 — убрать из отслеживания.")
     return "\n".join(lines)

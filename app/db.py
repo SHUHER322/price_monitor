@@ -3,7 +3,7 @@
 Таблицы:
     trackings      — отслеживания пользователей: товар, магазин или поисковый запрос
     tracking_items — какие товары входят в отслеживание магазина/поиска
-                     (чтобы заметить нового конкурента в выдаче)
+                     и на каком месте (чтобы заметить нового конкурента в выдаче)
     products       — последние известные сведения о товаре (название, продавец)
     prices         — история: цена, наличие, рейтинг на момент каждой проверки
 
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS tracking_items (
     article     TEXT    NOT NULL,
     first_seen  TEXT    NOT NULL,
     last_seen   TEXT    NOT NULL,
+    position    INTEGER,                    -- место в выдаче/магазине: 1, 2, 3…
     PRIMARY KEY (tracking_id, source, article)
 );
 
@@ -84,6 +85,23 @@ class Tracking:
 
 
 @dataclass(frozen=True)
+class ItemRow:
+    """Товар отслеживания (магазина/поиска) с последней ценой — для выгрузки."""
+    position: int | None
+    article: str
+    name: str
+    brand: str
+    seller: str
+    url: str
+    price: int | None
+    old_price: int | None
+    quantity: int | None
+    rating: float | None
+    feedbacks: int | None
+    checked_at: str | None
+
+
+@dataclass(frozen=True)
 class PricePoint:
     """Одна запись истории цены."""
     checked_at: str
@@ -113,6 +131,12 @@ class Database:
     async def init(self) -> None:
         async with self._connect() as db:
             await db.executescript(SCHEMA)
+            # Миграция: в базах, созданных до появления столбца position,
+            # добавляем его (данные не теряются — как category в lead_bot)
+            columns = {row[1] for row in await (await db.execute(
+                "PRAGMA table_info(tracking_items)")).fetchall()}
+            if "position" not in columns:
+                await db.execute("ALTER TABLE tracking_items ADD COLUMN position INTEGER")
             await db.commit()
 
     # --- отслеживания ---
@@ -149,6 +173,14 @@ class Database:
             rows = await (await db.execute(query + " ORDER BY id", params)).fetchall()
         return [Tracking(*row) for row in rows]
 
+    async def get_tracking(self, user_id: int, tracking_id: int) -> Tracking | None:
+        """Одно отслеживание — только если оно принадлежит этому пользователю."""
+        async with self._connect() as db:
+            row = await (await db.execute(
+                "SELECT id, user_id, kind, source, target, title, target_price, created_at "
+                "FROM trackings WHERE id = ? AND user_id = ?", (tracking_id, user_id))).fetchone()
+        return Tracking(*row) if row else None
+
     async def count_trackings(self, user_id: int) -> int:
         async with self._connect() as db:
             row = await (await db.execute(
@@ -166,7 +198,8 @@ class Database:
 
     async def update_tracking_items(self, tracking_id: int, source: str,
                                     articles: list[str]) -> tuple[set[str], bool]:
-        """Запомнить, какие товары сейчас в магазине/выдаче.
+        """Запомнить, какие товары сейчас в магазине/выдаче и на каких местах
+        (порядок списка articles = порядок на сайте).
         Возвращает (новые артикулы, первая ли это проверка).
         На первой проверке «новыми» оказываются все — уведомлять о них не нужно."""
         now = utc_now()
@@ -176,10 +209,12 @@ class Database:
                 (tracking_id,))).fetchall()
             known = {row[0] for row in rows}
             await db.executemany(
-                "INSERT INTO tracking_items (tracking_id, source, article, first_seen, last_seen) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT (tracking_id, source, article) DO UPDATE SET last_seen = excluded.last_seen",
-                [(tracking_id, source, a, now, now) for a in articles])
+                "INSERT INTO tracking_items "
+                "(tracking_id, source, article, first_seen, last_seen, position) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (tracking_id, source, article) DO UPDATE SET "
+                "last_seen = excluded.last_seen, position = excluded.position",
+                [(tracking_id, source, a, now, now, i) for i, a in enumerate(articles, 1)])
             await db.commit()
         return set(articles) - known, not known
 
@@ -230,3 +265,32 @@ class Database:
                 "WHERE source = ? AND article = ? ORDER BY checked_at",
                 (source, article))).fetchall()
         return [PricePoint(*row) for row in rows]
+
+    async def tracking_rows(self, tracking_id: int) -> list[ItemRow]:
+        """Товары, которые были в магазине/выдаче на последней проверке,
+        с последней известной ценой — по порядку мест."""
+        # cur  — товары с самой свежей отметкой last_seen (выпавшие из топа — старше)
+        # last — id самой свежей записи цены каждого товара
+        query = """
+            WITH cur AS (
+                SELECT source, article, position, rowid AS added FROM tracking_items
+                WHERE tracking_id = ? AND last_seen =
+                      (SELECT MAX(last_seen) FROM tracking_items WHERE tracking_id = ?)
+            ),
+            last AS (
+                SELECT MAX(id) AS id FROM prices
+                WHERE (source, article) IN (SELECT source, article FROM cur)
+                GROUP BY source, article
+            )
+            SELECT cur.position, cur.article, p.name, p.brand, p.seller, p.url,
+                   pr.price, pr.old_price, pr.quantity, pr.rating, pr.feedbacks, pr.checked_at
+            FROM cur
+            JOIN products p ON p.source = cur.source AND p.article = cur.article
+            LEFT JOIN prices pr ON pr.id IN (SELECT id FROM last)
+                               AND pr.source = cur.source AND pr.article = cur.article
+            -- без места (старые записи до миграции) — в порядке добавления
+            ORDER BY cur.position IS NULL, cur.position, cur.added
+        """
+        async with self._connect() as db:
+            rows = await (await db.execute(query, (tracking_id, tracking_id))).fetchall()
+        return [ItemRow(*row) for row in rows]

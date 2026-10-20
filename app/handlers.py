@@ -5,19 +5,22 @@
 на любом шаге диалога.
 """
 import logging
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from .config import Config
 from .db import Database
+from .excel import build_workbook, export_filename
 from .formatting import (esc, parse_rubles, product_card, products_preview,
                          trackings_text)
 from .keyboards import (BTN_CANCEL, BTN_LIST, BTN_PRODUCT, BTN_SEARCH, BTN_SELLER,
-                        BTN_SKIP, DELETE_PREFIX, cancel_kb, delete_kb, main_kb, price_kb)
+                        BTN_SKIP, DELETE_PREFIX, EXPORT_PREFIX, cancel_kb, export_kb,
+                        list_kb, main_kb, price_kb)
 from .sources import wb
 from .sources.base import BlockedError, ProductInfo, SourceError, format_price
 from .sources.wb import WBSource
@@ -72,7 +75,7 @@ async def show_list(message: Message, state: FSMContext, db: Database) -> None:
     trackings = await db.list_trackings(message.from_user.id)
     products = [t.target for t in trackings if t.kind == "product"]
     last = await db.last_prices("wb", products)
-    await message.answer(trackings_text(trackings, last), reply_markup=delete_kb(trackings))
+    await message.answer(trackings_text(trackings, last), reply_markup=list_kb(trackings))
 
 
 @router.callback_query(F.data.startswith(DELETE_PREFIX))
@@ -86,9 +89,29 @@ async def delete_tracking(callback: CallbackQuery, db: Database) -> None:
     last = await db.last_prices("wb", products)
     try:
         await callback.message.edit_text(trackings_text(trackings, last),
-                                         reply_markup=delete_kb(trackings))
+                                         reply_markup=list_kb(trackings))
     except TelegramBadRequest:
         pass  # текст не изменился (нажали дважды) — Telegram ругается, это не ошибка
+
+
+@router.callback_query(F.data.startswith(EXPORT_PREFIX))
+async def export_tracking(callback: CallbackQuery, db: Database, config: Config) -> None:
+    """Выгрузка магазина/поиска в Excel. Данные — из нашей базы, к WB не ходим."""
+    tracking_id = int(callback.data.removeprefix(EXPORT_PREFIX))
+    tracking = await db.get_tracking(callback.from_user.id, tracking_id)
+    if tracking is None:
+        await callback.answer("Это отслеживание уже удалено", show_alert=True)
+        return
+    rows = await db.tracking_rows(tracking.id)
+    if not rows:
+        await callback.answer("Пока нет данных для выгрузки", show_alert=True)
+        return
+    await callback.answer("Готовлю файл…")
+    now = datetime.now(config.timezone)
+    content = build_workbook(tracking, rows, config.timezone, now)
+    await callback.message.answer_document(
+        BufferedInputFile(content, filename=export_filename(tracking, now)),
+        caption=f"📊 {esc(tracking.title)}: {len(rows)} товаров")
 
 
 # --- кнопки меню: начинают диалог (даже если другой не закончен) ---
@@ -210,12 +233,13 @@ async def get_seller_link(message: Message, state: FSMContext, db: Database,
                                                  seller_id, title)
     await save_baseline(db, tracking_id, products)
     if not created:
-        await message.answer("Этот магазин уже отслеживается.", reply_markup=main_kb)
-        return
-    await message.answer(
-        f"✅ Слежу за магазином «{esc(title)}»: {len(products)} товаров.\n"
-        "Сообщу о снижении цен и о новых товарах.\n\n"
-        f"{products_preview(products)}", reply_markup=main_kb)
+        await message.answer("Этот магазин уже отслеживается. Данные обновил.",
+                             reply_markup=main_kb)
+    else:
+        await message.answer(f"✅ Слежу за магазином «{esc(title)}». "
+                             "Сообщу о снижении цен и о новых товарах.", reply_markup=main_kb)
+    await message.answer(f"Товаров: {len(products)}\n\n{products_preview(products)}",
+                         reply_markup=export_kb(tracking_id))
 
 
 # --- поиск ---
@@ -247,12 +271,14 @@ async def get_search_query(message: Message, state: FSMContext, db: Database,
                                                  query.lower(), query)
     await save_baseline(db, tracking_id, products)
     if not created:
-        await message.answer("Этот запрос уже отслеживается.", reply_markup=main_kb)
-        return
-    await message.answer(
-        f"✅ Слежу за поиском «{esc(query)}»: топ-{len(products)}.\n"
-        "Сообщу о снижении цен и о новых товарах в топе.\n\n"
-        f"{products_preview(products)}", reply_markup=main_kb)
+        await message.answer("Этот запрос уже отслеживается. Данные обновил.",
+                             reply_markup=main_kb)
+    else:
+        await message.answer(f"✅ Слежу за поиском «{esc(query)}». "
+                             "Сообщу о снижении цен и о новых товарах в топе.",
+                             reply_markup=main_kb)
+    await message.answer(f"Топ-{len(products)}:\n\n{products_preview(products)}",
+                         reply_markup=export_kb(tracking_id))
 
 
 async def save_baseline(db: Database, tracking_id: int, products: list[ProductInfo]) -> None:
