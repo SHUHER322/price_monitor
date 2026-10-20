@@ -102,6 +102,21 @@ class ItemRow:
 
 
 @dataclass(frozen=True)
+class ProductSummary:
+    """Всё, что известно о товаре в нашей базе — для карточки в боте."""
+    name: str
+    url: str
+    price: int | None
+    old_price: int | None
+    quantity: int
+    sizes: list[dict]          # [{"name": "M", "price": 113800, "quantity": None}, …]
+    checked_at: str
+    min_price: int | None      # за всё время отслеживания
+    max_price: int | None
+    checks: int                # сколько раз проверяли
+
+
+@dataclass(frozen=True)
 class PricePoint:
     """Одна запись истории цены."""
     checked_at: str
@@ -186,6 +201,17 @@ class Database:
             row = await (await db.execute(
                 "SELECT COUNT(*) FROM trackings WHERE user_id = ?", (user_id,))).fetchone()
         return row[0]
+
+    async def set_target_price(self, user_id: int, tracking_id: int,
+                               target_price: int | None) -> bool:
+        """Изменить желаемую цену товара (None — убрать). Только своего."""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "UPDATE trackings SET target_price = ? "
+                "WHERE id = ? AND user_id = ? AND kind = 'product'",
+                (target_price, tracking_id, user_id))
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def remove_tracking(self, user_id: int, tracking_id: int) -> bool:
         """Удалить. user_id в условии — чтобы нельзя было удалить чужое."""
@@ -294,3 +320,22 @@ class Database:
         async with self._connect() as db:
             rows = await (await db.execute(query, (tracking_id, tracking_id))).fetchall()
         return [ItemRow(*row) for row in rows]
+
+    async def product_summary(self, source: str, article: str) -> ProductSummary | None:
+        """Последние сведения о товаре и разброс цены за всё время."""
+        async with self._connect() as db:
+            last = await (await db.execute(
+                "SELECT p.name, p.url, pr.price, pr.old_price, pr.quantity, pr.sizes, "
+                "pr.checked_at FROM products p "
+                "JOIN prices pr ON pr.source = p.source AND pr.article = p.article "
+                "WHERE p.source = ? AND p.article = ? ORDER BY pr.id DESC LIMIT 1",
+                (source, article))).fetchone()
+            if last is None:
+                return None
+            # MIN и MAX пропускают NULL — периоды «нет в наличии» не мешают
+            stats = await (await db.execute(
+                "SELECT MIN(price), MAX(price), COUNT(*) FROM prices "
+                "WHERE source = ? AND article = ?", (source, article))).fetchone()
+        name, url, price, old_price, quantity, sizes, checked_at = last
+        return ProductSummary(name, url, price, old_price, quantity,
+                              json.loads(sizes) if sizes else [], checked_at, *stats)

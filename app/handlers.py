@@ -11,20 +11,22 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
+from .checker import Checker, change_notes, find_changes
 from .config import Config
 from .db import Database
-from .excel import build_workbook, export_filename
-from .formatting import (esc, parse_rubles, product_card, products_preview,
-                         trackings_text)
-from .keyboards import (BTN_CANCEL, BTN_LIST, BTN_PRODUCT, BTN_SEARCH, BTN_SELLER,
-                        BTN_SKIP, DELETE_PREFIX, EXPORT_PREFIX, cancel_kb, export_kb,
-                        list_kb, main_kb, price_kb)
+from .excel import build_workbook, export_filename, to_local
+from .formatting import (esc, parse_rubles, product_card, product_summary_text,
+                         products_preview, trackings_text)
+from .keyboards import (BTN_CANCEL, BTN_LIST, BTN_PRODUCT, BTN_SEARCH, BTN_SELLER, BTN_SKIP,
+                        DELETE_PREFIX, EXPORT_PREFIX, LIST_CALLBACK, NO_TARGET_PREFIX,
+                        RECHECK_PREFIX, TARGET_PREFIX, VIEW_PREFIX, cancel_kb, export_kb,
+                        list_kb, main_kb, price_kb, product_kb, target_inline_kb)
 from .sources import wb
 from .sources.base import BlockedError, ProductInfo, SourceError, format_price
 from .sources.wb import WBSource
-from .states import AddProduct, AddSearch, AddSeller
+from .states import AddProduct, AddSearch, AddSeller, EditTarget
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -58,40 +60,91 @@ async def start(message: Message, state: FSMContext) -> None:
         f"{BTN_PRODUCT} — следить за одним товаром (можно задать желаемую цену)\n"
         f"{BTN_SELLER} — следить за всеми товарами продавца\n"
         f"{BTN_SEARCH} — следить за топом поисковой выдачи\n\n"
+        "Цены проверяю сам по расписанию, а /check — проверить прямо сейчас.\n\n"
         "Выберите в меню 👇", reply_markup=main_kb)
 
 
 @router.message(F.text == BTN_CANCEL)
 @router.message(Command("cancel"))
-async def cancel(message: Message, state: FSMContext) -> None:
+async def cancel(message: Message, state: FSMContext, db: Database, config: Config) -> None:
+    editing = await state.get_state() == EditTarget.price.state
+    data = await state.get_data()
     await state.clear()
+    if editing:
+        # Отменили смену цели — то же сообщение снова становится карточкой товара
+        await show_card_in(message.bot, data, message.from_user.id, db, config)
+        await safe_delete(message)
+        return
     await message.answer("Отменено.", reply_markup=main_kb)
+
+
+@router.message(Command("check"))
+async def check_now(message: Message, state: FSMContext, checker: Checker,
+                    db: Database) -> None:
+    """Проверить свои отслеживания, не дожидаясь расписания.
+    Уведомления об изменениях придут отдельными сообщениями, как обычно."""
+    await state.clear()
+    if not await db.count_trackings(message.from_user.id):
+        await message.answer("Пока нечего проверять: вы ничего не отслеживаете.\n"
+                             "Выберите в меню, за чем следить: товар, магазин или поиск.",
+                             reply_markup=main_kb)
+        return
+    if checker.running:
+        await message.answer("Проверка уже идёт — уведомления придут, когда она закончится.")
+        return
+    await message.answer("⏳ Проверяю ваши отслеживания… Это может занять пару минут.")
+    sent = await checker.run(message.from_user.id)
+    await message.answer(f"Готово. Сообщений об изменениях: {sent}." if sent
+                         else "Готово. Заметных изменений нет.", reply_markup=main_kb)
+
+
+async def list_view(db: Database, user_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Текст и кнопки списка «Мои отслеживания»."""
+    trackings = await db.list_trackings(user_id)
+    products = [t.target for t in trackings if t.kind == "product"]
+    last = await db.last_prices("wb", products)
+    return trackings_text(trackings, last), list_kb(trackings)
+
+
+async def edit(message: Message, text: str, keyboard: InlineKeyboardMarkup | None) -> None:
+    """Заменить текст и кнопки сообщения на месте — без новых сообщений в чате."""
+    try:
+        await message.edit_text(text, reply_markup=keyboard)
+    except TelegramBadRequest:
+        pass  # текст не изменился (нажали дважды) — Telegram ругается, это не ошибка
+
+
+async def safe_delete(message: Message) -> None:
+    """Убрать сообщение пользователя (например, введённую сумму), чтобы не было мусора."""
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
 
 
 @router.message(F.text == BTN_LIST)
 @router.message(Command("list"))
 async def show_list(message: Message, state: FSMContext, db: Database) -> None:
     await state.clear()
-    trackings = await db.list_trackings(message.from_user.id)
-    products = [t.target for t in trackings if t.kind == "product"]
-    last = await db.last_prices("wb", products)
-    await message.answer(trackings_text(trackings, last), reply_markup=list_kb(trackings))
+    text, keyboard = await list_view(db, message.from_user.id)
+    await message.answer(text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == LIST_CALLBACK)
+async def back_to_list(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
+    await state.clear()
+    await callback.answer()
+    await edit(callback.message, *await list_view(db, callback.from_user.id))
 
 
 @router.callback_query(F.data.startswith(DELETE_PREFIX))
-async def delete_tracking(callback: CallbackQuery, db: Database) -> None:
+async def delete_tracking(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
+    await state.clear()
     tracking_id = int(callback.data.removeprefix(DELETE_PREFIX))
     removed = await db.remove_tracking(callback.from_user.id, tracking_id)
     await callback.answer("Удалено" if removed else "Уже удалено")
-    # Обновляем список в том же сообщении
-    trackings = await db.list_trackings(callback.from_user.id)
-    products = [t.target for t in trackings if t.kind == "product"]
-    last = await db.last_prices("wb", products)
-    try:
-        await callback.message.edit_text(trackings_text(trackings, last),
-                                         reply_markup=list_kb(trackings))
-    except TelegramBadRequest:
-        pass  # текст не изменился (нажали дважды) — Telegram ругается, это не ошибка
+    # То же сообщение (список или карточка) становится обновлённым списком
+    await edit(callback.message, *await list_view(db, callback.from_user.id))
 
 
 @router.callback_query(F.data.startswith(EXPORT_PREFIX))
@@ -112,6 +165,113 @@ async def export_tracking(callback: CallbackQuery, db: Database, config: Config)
     await callback.message.answer_document(
         BufferedInputFile(content, filename=export_filename(tracking, now)),
         caption=f"📊 {esc(tracking.title)}: {len(rows)} товаров")
+
+
+# --- карточка товара: всё происходит в одном сообщении ---
+
+async def own_product(callback: CallbackQuery, db: Database, prefix: str):
+    """Отслеживание товара из нажатой кнопки — если оно есть и принадлежит пользователю."""
+    tracking = await db.get_tracking(callback.from_user.id,
+                                     int(callback.data.removeprefix(prefix)))
+    if tracking is None or tracking.kind != "product":
+        await callback.answer("Это отслеживание уже удалено", show_alert=True)
+        return None
+    return tracking
+
+
+async def card_view(db: Database, config: Config, tracking,
+                    notes: list[str] | None = None) -> tuple[str, InlineKeyboardMarkup]:
+    """Текст и кнопки карточки. notes — строки сверху: что только что изменилось."""
+    summary = await db.product_summary("wb", tracking.target)
+    if summary is None:
+        text = "По этому товару ещё нет данных. Нажмите «🔄 Обновить»."
+    else:
+        text = product_summary_text(tracking, summary,
+                                    to_local(summary.checked_at, config.timezone))
+    if notes:
+        text = "\n".join(notes) + "\n\n" + text
+    return text, product_kb(tracking.id)
+
+
+async def show_card_in(bot, data: dict, user_id: int, db: Database, config: Config,
+                       notes: list[str] | None = None) -> None:
+    """Превратить запомненное сообщение (вопрос о цели) обратно в карточку."""
+    tracking = await db.get_tracking(user_id, data["tracking_id"])
+    if tracking is None:
+        text, keyboard = await list_view(db, user_id)
+    else:
+        text, keyboard = await card_view(db, config, tracking, notes)
+    try:
+        await bot.edit_message_text(text, chat_id=data["chat_id"],
+                                    message_id=data["message_id"], reply_markup=keyboard)
+    except TelegramBadRequest:
+        pass
+
+
+@router.callback_query(F.data.startswith(VIEW_PREFIX))
+async def view_product(callback: CallbackQuery, state: FSMContext, db: Database,
+                       config: Config) -> None:
+    """Карточка товара — из нашей базы, мгновенно и без запросов к WB.
+    Сюда же ведёт «◀️ Назад» из вопроса о цели."""
+    await state.clear()
+    tracking = await own_product(callback, db, VIEW_PREFIX)
+    if tracking is None:
+        return
+    await callback.answer()
+    await edit(callback.message, *await card_view(db, config, tracking))
+
+
+@router.callback_query(F.data.startswith(RECHECK_PREFIX))
+async def recheck_product(callback: CallbackQuery, db: Database, config: Config,
+                          wb_source: WBSource) -> None:
+    """Свежие данные с WB по одному товару (с точными остатками по размерам)."""
+    tracking = await own_product(callback, db, RECHECK_PREFIX)
+    if tracking is None:
+        return
+    await callback.answer("Обновляю…")
+    old = (await db.last_prices("wb", [tracking.target])).get(tracking.target)
+    try:
+        info = await wb_source.fetch(tracking.target)
+    except SourceError as e:
+        log.warning("Обновление товара %s: %s", tracking.target, e)
+        await edit(callback.message, *await card_view(db, config, tracking, [error_text(e)]))
+        return
+    changes = find_changes(old, info, config.price_drop_percent, tracking.target_price)
+    await db.save_snapshot([info])
+    notes = change_notes(tracking, changes) or ["🔄 Обновлено, заметных изменений нет"]
+    await edit(callback.message, *await card_view(db, config, tracking, notes))
+
+
+@router.callback_query(F.data.startswith(TARGET_PREFIX))
+async def ask_target(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
+    tracking = await own_product(callback, db, TARGET_PREFIX)
+    if tracking is None:
+        return
+    await callback.answer()
+    # Запоминаем, какое сообщение потом превратить обратно в карточку
+    await state.set_state(EditTarget.price)
+    await state.update_data(tracking_id=tracking.id, chat_id=callback.message.chat.id,
+                            message_id=callback.message.message_id)
+    now = (f"Сейчас цель: {format_price(tracking.target_price)}.\n"
+           if tracking.target_price else "")
+    await edit(callback.message,
+               f"🎯 <b>{esc(tracking.title[:60])}</b>\n{now}"
+               "Напишите новую желаемую цену в рублях, например <b>2500</b>.",
+               target_inline_kb(tracking.id, has_target=bool(tracking.target_price)))
+
+
+@router.callback_query(F.data.startswith(NO_TARGET_PREFIX))
+async def remove_target(callback: CallbackQuery, state: FSMContext, db: Database,
+                        config: Config) -> None:
+    tracking = await own_product(callback, db, NO_TARGET_PREFIX)
+    if tracking is None:
+        return
+    await state.clear()
+    await db.set_target_price(callback.from_user.id, tracking.id, None)
+    await callback.answer("Цель убрана")
+    tracking = await db.get_tracking(callback.from_user.id, tracking.id)
+    await edit(callback.message, *await card_view(
+        db, config, tracking, ["🚫 Цель убрана — сообщу о любом заметном снижении цены"]))
 
 
 # --- кнопки меню: начинают диалог (даже если другой не закончен) ---
@@ -138,6 +298,34 @@ async def ask_search(message: Message, state: FSMContext) -> None:
     await state.set_state(AddSearch.query)
     await message.answer("Что ищем? Напишите запрос, как в поиске Wildberries.\n"
                          "Например: стеклянный коврик для мыши", reply_markup=cancel_kb)
+
+
+# --- изменение желаемой цены (после кнопок меню: они важнее) ---
+
+@router.message(EditTarget.price, F.text)
+async def get_target(message: Message, state: FSMContext, db: Database,
+                     config: Config) -> None:
+    data = await state.get_data()
+    # Введённую сумму убираем из чата — всё видно в карточке
+    await safe_delete(message)
+    target_price = parse_rubles(message.text)
+    if target_price is None:
+        tracking = await db.get_tracking(message.from_user.id, data["tracking_id"])
+        if tracking is not None:
+            try:
+                await message.bot.edit_message_text(
+                    f"🎯 <b>{esc(tracking.title[:60])}</b>\n"
+                    f"Не понял «{esc(message.text[:30])}». Напишите число в рублях, "
+                    "например <b>2500</b>.", chat_id=data["chat_id"],
+                    message_id=data["message_id"],
+                    reply_markup=target_inline_kb(tracking.id, bool(tracking.target_price)))
+            except TelegramBadRequest:
+                pass
+        return
+    await state.clear()
+    await db.set_target_price(message.from_user.id, data["tracking_id"], target_price)
+    await show_card_in(message.bot, data, message.from_user.id, db, config,
+                       [f"🎯 Желаемая цена: {format_price(target_price)}"])
 
 
 # --- товар ---
@@ -290,7 +478,7 @@ async def save_baseline(db: Database, tracking_id: int, products: list[ProductIn
 
 # --- всё остальное ---
 
-@router.message(StateFilter(AddProduct, AddSeller, AddSearch))
+@router.message(StateFilter(AddProduct, AddSeller, AddSearch, EditTarget))
 async def wrong_input(message: Message) -> None:
     """На шаге диалога прислали не текст (фото, стикер…)."""
     await message.answer("Пришлите, пожалуйста, текстом — или нажмите «Отменить».")

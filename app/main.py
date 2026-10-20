@@ -4,14 +4,18 @@
 """
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .access import AccessMiddleware
+from .checker import Checker
 from .config import load_config
 from .db import Database
 from .handlers import router
@@ -22,6 +26,7 @@ log = logging.getLogger(__name__)
 COMMANDS = [
     BotCommand(command="start", description="Меню"),
     BotCommand(command="list", description="Мои отслеживания"),
+    BotCommand(command="check", description="Проверить цены сейчас"),
     BotCommand(command="cancel", description="Отменить"),
 ]
 
@@ -42,9 +47,40 @@ async def main() -> None:
     wb_source = WBSource(data_dir / "wb_session.json", data_dir / "wb_browser_profile",
                          dest=config.wb_dest)
 
-    bot = Bot(config.bot_token, default=DefaultBotProperties(parse_mode="HTML"))
+    # link_preview_is_disabled — без огромных превью ссылок в уведомлениях
+    bot = Bot(config.bot_token, default=DefaultBotProperties(parse_mode="HTML",
+                                                             link_preview_is_disabled=True))
+
+    async def notify(user_id: int, text: str) -> None:
+        """Отправить уведомление. Ошибка одному пользователю не мешает остальным."""
+        try:
+            await bot.send_message(user_id, text)
+        except TelegramForbiddenError:
+            log.warning("Пользователь %s заблокировал бота", user_id)
+        except TelegramAPIError as e:
+            log.warning("Не отправилось %s: %s", user_id, e)
+        await asyncio.sleep(0.1)  # Telegram ограничивает частоту сообщений
+
+    checker = Checker(db, wb_source, notify, drop_percent=config.price_drop_percent,
+                      search_limit=config.search_limit, seller_limit=config.seller_limit)
+
+    async def scheduled_check() -> None:
+        try:
+            await checker.run()
+        except Exception:
+            # Любая неожиданная ошибка — в лог, а бот и расписание продолжают работать
+            log.exception("Проверка по расписанию упала")
+
+    # Расписание: первая проверка через минуту после запуска, дальше каждые N часов.
+    # coalesce — если компьютер спал и пропустил несколько запусков, сделать один
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(scheduled_check, "interval", hours=config.check_interval_hours,
+                      next_run_time=datetime.now() + timedelta(minutes=1),
+                      max_instances=1, coalesce=True, misfire_grace_time=3600)
+
     # Всё, что передано в Dispatcher, aiogram подставит в обработчики по имени аргумента
-    dp = Dispatcher(storage=MemoryStorage(), db=db, config=config, wb_source=wb_source)
+    dp = Dispatcher(storage=MemoryStorage(), db=db, config=config, wb_source=wb_source,
+                    checker=checker)
     access = AccessMiddleware(config.allowed_users)
     dp.message.outer_middleware(access)
     dp.callback_query.outer_middleware(access)
@@ -55,11 +91,14 @@ async def main() -> None:
     except Exception as e:  # не критично: бот работает и без списка команд
         log.warning("Не удалось задать список команд: %s", e)
 
-    log.info("Бот запущен. Пользователей с доступом: %d", len(config.allowed_users))
+    scheduler.start()
+    log.info("Бот запущен. Пользователей с доступом: %d. Проверка цен каждые %d ч.",
+             len(config.allowed_users), config.check_interval_hours)
     try:
         await dp.start_polling(bot)
     finally:
-        # Аккуратно закрыть соединение с Telegram при остановке
+        # Аккуратно остановить расписание и закрыть соединение с Telegram
+        scheduler.shutdown(wait=False)
         await bot.session.close()
 
 

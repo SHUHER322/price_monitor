@@ -3,7 +3,7 @@
 import html
 import re
 
-from .db import PricePoint, Tracking
+from .db import PricePoint, ProductSummary, Tracking
 from .sources.base import ProductInfo, format_price
 from .sources.wb import STOCK_CAP
 
@@ -92,5 +92,45 @@ def trackings_text(trackings: list[Tracking], last_prices: dict[str, PricePoint]
     for i, t in enumerate(trackings, 1):
         last = last_prices.get(t.target) if t.kind == "product" else None
         lines.append(tracking_line(i, t, last))
-    lines.append("\n📊 — выгрузить магазин или поиск в Excel, 🗑 — убрать из отслеживания.")
+    lines.append("\n🔎 — подробнее о товаре, 📊 — выгрузить магазин или поиск в Excel, "
+                 "🗑 — убрать из отслеживания.")
+    return "\n".join(lines)
+
+
+def sizes_line(sizes: list[dict]) -> str | None:
+    """[S есть, M есть, XL нет] → 'S, M — есть; XL — нет'. Без размеров — None."""
+    named = [s for s in sizes if s.get("name")]
+    if not named:
+        return None
+    def available(s: dict) -> bool:
+        return s.get("price") is not None and s.get("quantity") != 0
+    have = [esc(s["name"]) for s in named if available(s)]
+    missing = [esc(s["name"]) for s in named if not available(s)]
+    parts = []
+    if have:
+        parts.append(f"{', '.join(have)} — есть")
+    if missing:
+        parts.append(f"{', '.join(missing)} — нет")
+    return "; ".join(parts)
+
+
+def product_summary_text(tracking: Tracking, summary: ProductSummary, checked_local: str) -> str:
+    """Карточка отслеживаемого товара (по данным из нашей базы)."""
+    lines = [f'🛍 <a href="{summary.url}">{esc(summary.name)}</a>']
+    if summary.price is not None:
+        old = f" (без скидки {format_price(summary.old_price)})" if summary.old_price else ""
+        lines.append(f"Сейчас: <b>{format_price(summary.price)}</b>{old}, "
+                     f"в наличии: {stock_text(summary.quantity)}")
+    else:
+        lines.append("Сейчас: <b>нет в наличии</b>")
+    lines.append(f"Желаемая цена: {format_price(tracking.target_price)}"
+                 if tracking.target_price else
+                 "Желаемая цена: не задана (сообщу о любом заметном снижении)")
+    if summary.checks > 1 and summary.min_price is not None:
+        lines.append(f"За время отслеживания: мин {format_price(summary.min_price)}, "
+                     f"макс {format_price(summary.max_price)}")
+    sizes = sizes_line(summary.sizes)
+    if sizes:
+        lines.append(f"Размеры: {sizes}")
+    lines.append(f"Проверено: {checked_local}")
     return "\n".join(lines)

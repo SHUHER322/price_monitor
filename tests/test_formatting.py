@@ -64,3 +64,36 @@ def test_card_with_sizes():
                                             (43, "43+ шт.")])
 def test_stock_text(quantity, text):
     assert stock_text(quantity) == text
+
+
+from app.db import ProductSummary
+from app.formatting import product_summary_text, sizes_line
+
+
+def test_sizes_line():
+    sizes = [{"name": "S", "price": 1, "quantity": None},    # из списка: количество неизвестно
+             {"name": "M", "price": 1, "quantity": 3},
+             {"name": "XL", "price": None, "quantity": None}]
+    assert sizes_line(sizes) == "S, M — есть; XL — нет"
+    assert sizes_line([{"name": "", "price": 1, "quantity": 5}]) is None   # без размеров
+
+
+def test_product_summary_text():
+    summary = ProductSummary(name="Лонгслив", url="https://wb/1", price=113800, old_price=299000,
+                             quantity=43, sizes=[{"name": "M", "price": 113800, "quantity": 2}],
+                             checked_at="2026-10-20 13:01:00", min_price=113800,
+                             max_price=129000, checks=4)
+    text = product_summary_text(tracking(target_price=100000), summary, "20.10.2026 20:01")
+    assert "Сейчас: <b>1 138 ₽</b> (без скидки 2 990 ₽), в наличии: 43+ шт." in text
+    assert "Желаемая цена: 1 000 ₽" in text
+    assert "мин 1 138 ₽, макс 1 290 ₽" in text
+    assert "Размеры: M — есть" in text
+    assert "Проверено: 20.10.2026 20:01" in text
+
+
+def test_product_summary_text_out_of_stock_no_goal():
+    summary = ProductSummary("Лонгслив", "https://wb/1", None, None, 0, [], "x", None, None, 1)
+    text = product_summary_text(tracking(), summary, "—")
+    assert "нет в наличии" in text
+    assert "не задана" in text
+    assert "мин" not in text                        # одна проверка — разброса ещё нет

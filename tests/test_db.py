@@ -150,3 +150,30 @@ def test_get_tracking_only_own(db):
     tracking_id, _ = run(db.add_tracking(111, "seller", "wb", "250079242", "K A.RU"))
     assert run(db.get_tracking(111, tracking_id)).title == "K A.RU"
     assert run(db.get_tracking(222, tracking_id)) is None
+
+
+# --- карточка товара ---
+
+def test_set_target_price_only_own_product(db):
+    product_id, _ = run(db.add_tracking(111, "product", "wb", "1", "Коврик", target_price=250000))
+    seller_id, _ = run(db.add_tracking(111, "seller", "wb", "2", "K A.RU"))
+    assert run(db.set_target_price(111, product_id, 200000))
+    assert run(db.get_tracking(111, product_id)).target_price == 200000
+    assert run(db.set_target_price(111, product_id, None))           # убрать цель
+    assert run(db.get_tracking(111, product_id)).target_price is None
+    assert not run(db.set_target_price(222, product_id, 100000))     # чужое — нельзя
+    assert not run(db.set_target_price(111, seller_id, 100000))      # у магазина цели нет
+
+
+def test_product_summary(db):
+    assert run(db.product_summary("wb", "1")) is None
+    run(db.save_snapshot([product("1", 300000)], "2026-10-20 10:00:00"))
+    run(db.save_snapshot([product("1", None, quantity=0)], "2026-10-20 13:00:00"))
+    sizes = (SizeInfo("S", 250000, 500000, 3), SizeInfo("M", None, None, 0))
+    run(db.save_snapshot([product("1", 276300, sizes=sizes)], "2026-10-20 16:00:00"))
+    summary = run(db.product_summary("wb", "1"))
+    assert summary.price == 276300                  # последняя цена
+    assert (summary.min_price, summary.max_price) == (276300, 300000)  # «нет в наличии» не мешает
+    assert summary.checks == 3
+    assert [s["name"] for s in summary.sizes] == ["S", "M"]
+    assert summary.checked_at == "2026-10-20 16:00:00"

@@ -14,6 +14,11 @@ BTN_SKIP = "⏭ Пропустить"
 
 DELETE_PREFIX = "del:"
 EXPORT_PREFIX = "xls:"
+VIEW_PREFIX = "view:"       # открыть карточку товара
+TARGET_PREFIX = "target:"   # изменить желаемую цену
+RECHECK_PREFIX = "recheck:" # обновить данные товара с WB
+NO_TARGET_PREFIX = "notarget:"  # убрать желаемую цену
+LIST_CALLBACK = "list"      # вернуться к списку отслеживаний
 
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
@@ -34,6 +39,24 @@ price_kb = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
+def product_kb(tracking_id: int) -> InlineKeyboardMarkup:
+    """Кнопки под карточкой товара. Всё меняется в том же сообщении."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎯 Изменить цель", callback_data=f"{TARGET_PREFIX}{tracking_id}"),
+         InlineKeyboardButton(text="🔄 Обновить", callback_data=f"{RECHECK_PREFIX}{tracking_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{DELETE_PREFIX}{tracking_id}"),
+         InlineKeyboardButton(text="◀️ К списку", callback_data=LIST_CALLBACK)],
+    ])
+
+
+def target_inline_kb(tracking_id: int, has_target: bool) -> InlineKeyboardMarkup:
+    """Кнопки, пока ждём новую цель: «Без цели» — только если цель есть."""
+    row = [InlineKeyboardButton(text="◀️ Назад", callback_data=f"{VIEW_PREFIX}{tracking_id}")]
+    if has_target:
+        row.insert(0, InlineKeyboardButton(text="🚫 Без цели",
+                                           callback_data=f"{NO_TARGET_PREFIX}{tracking_id}"))
+    return InlineKeyboardMarkup(inline_keyboard=[row])
+
 
 def export_kb(tracking_id: int) -> InlineKeyboardMarkup:
     """Кнопка под сообщением о добавлении магазина/поиска."""
@@ -46,14 +69,18 @@ def _rows(buttons: list[InlineKeyboardButton], per_row: int = 4) -> list[list]:
 
 
 def list_kb(trackings: list[Tracking]) -> InlineKeyboardMarkup | None:
-    """Кнопки под списком: «📊 2» — выгрузить магазин/поиск №2 в Excel,
-    «🗑 1» — удалить №1. По 4 в ряд.
+    """Кнопки под списком: «🔎 1» — карточка товара №1, «📊 2» — выгрузить
+    магазин/поиск №2 в Excel, «🗑 1» — удалить №1. По 4 в ряд.
     В callback_data — id отслеживания в базе, а не номер в списке:
     номер меняется после удаления, а id — нет."""
     if not trackings:
         return None
-    export = [InlineKeyboardButton(text=f"📊 {i}", callback_data=f"{EXPORT_PREFIX}{t.id}")
-              for i, t in enumerate(trackings, 1) if t.kind in ("seller", "search")]
+    # Для товара — карточка, для магазина и поиска — Excel; в порядке списка
+    open_buttons = [
+        InlineKeyboardButton(text=f"🔎 {i}", callback_data=f"{VIEW_PREFIX}{t.id}")
+        if t.kind == "product" else
+        InlineKeyboardButton(text=f"📊 {i}", callback_data=f"{EXPORT_PREFIX}{t.id}")
+        for i, t in enumerate(trackings, 1)]
     delete = [InlineKeyboardButton(text=f"🗑 {i}", callback_data=f"{DELETE_PREFIX}{t.id}")
               for i, t in enumerate(trackings, 1)]
-    return InlineKeyboardMarkup(inline_keyboard=_rows(export) + _rows(delete))
+    return InlineKeyboardMarkup(inline_keyboard=_rows(open_buttons) + _rows(delete))

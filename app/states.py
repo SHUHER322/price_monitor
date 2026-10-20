@@ -13,3 +13,7 @@ class AddSeller(StatesGroup):
 
 class AddSearch(StatesGroup):
     query = State()   # ждём поисковый запрос
+
+
+class EditTarget(StatesGroup):
+    price = State()   # ждём новую желаемую цену товара
