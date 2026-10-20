@@ -1,0 +1,10 @@
+# Секреты и локальные данные
+.env
+*.db
+data/
+proxies.txt
+
+# Python
+__pycache__/
+.venv/
+.pytest_cache/
