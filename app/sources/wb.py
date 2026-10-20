@@ -112,7 +112,9 @@ def _parse_product(product: dict) -> ProductInfo:
     # Общая цена товара — самая низкая среди размеров, которые есть в продаже
     priced = [s for s in sizes if s.price is not None]
     best = min(priced, key=lambda s: s.price) if priced else None
-    rating = product.get("reviewRating", product.get("rating"))
+    feedbacks = product.get("feedbacks", 0)
+    # Без отзывов WB пишет рейтинг 0 — но это «не оценивали», а не «плохо»
+    rating = product.get("reviewRating", product.get("rating")) if feedbacks else None
 
     return ProductInfo(
         source=SOURCE,
@@ -127,7 +129,7 @@ def _parse_product(product: dict) -> ProductInfo:
         seller_id=str(product.get("supplierId", "")),
         brand=product.get("brand", ""),
         rating=float(rating) if rating is not None else None,
-        feedbacks=product.get("feedbacks", 0),
+        feedbacks=feedbacks,
     )
 
 
@@ -364,7 +366,8 @@ def _print_product(info: ProductInfo) -> None:
     else:
         print(f"Цена: {format_price(info.price)} (без скидки: {format_price(info.old_price)})\n"
               f"В наличии: {info.quantity} шт.")
-    print(f"Продавец: {info.seller}, рейтинг {info.rating}, отзывов {info.feedbacks}")
+    rating = f"{info.rating:.1f}" if info.rating is not None else "нет оценок"
+    print(f"Продавец: {info.seller}, рейтинг: {rating}, отзывов: {info.feedbacks}")
     print(info.url)
 
 

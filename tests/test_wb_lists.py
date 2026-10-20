@@ -195,3 +195,13 @@ def test_blocked_even_with_new_token(tmp_path):
     source._session_from_browser = fake_browser
     with pytest.raises(BlockedError):
         asyncio.run(source.search("коврик"))
+
+
+def test_no_feedbacks_means_no_rating():
+    # Без отзывов WB пишет рейтинг 0 — для нас это «не оценивали», а не «плохо»
+    data = load("wb_search.json")
+    data["products"][0]["feedbacks"] = 0
+    data["products"][0]["reviewRating"] = 0
+    products = parse_products(data)
+    assert products[0].rating is None
+    assert products[1].rating == 4.0

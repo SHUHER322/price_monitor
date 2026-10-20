@@ -1,0 +1,232 @@
+"""База SQLite: что отслеживаем и история цен.
+
+Таблицы:
+    trackings      — отслеживания пользователей: товар, магазин или поисковый запрос
+    tracking_items — какие товары входят в отслеживание магазина/поиска
+                     (чтобы заметить нового конкурента в выдаче)
+    products       — последние известные сведения о товаре (название, продавец)
+    prices         — история: цена, наличие, рейтинг на момент каждой проверки
+
+Время храним в UTC (всемирное время) — так проверки с сервера в любом поясе
+не перепутаются. В пояс пользователя переводим только при показе.
+"""
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+import aiosqlite
+
+from .sources.base import ProductInfo
+
+KINDS = ("product", "seller", "search")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS trackings (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL,
+    kind         TEXT    NOT NULL CHECK (kind IN ('product', 'seller', 'search')),
+    source       TEXT    NOT NULL,          -- 'wb', позже 'ozon'
+    target       TEXT    NOT NULL,          -- артикул, ID продавца или текст запроса
+    title        TEXT    NOT NULL,          -- что показывать в списке
+    target_price INTEGER,                   -- желаемая цена в копейках (только для товара)
+    created_at   TEXT    NOT NULL,
+    UNIQUE (user_id, kind, source, target)  -- одно и то же дважды не добавить
+);
+
+CREATE TABLE IF NOT EXISTS tracking_items (
+    tracking_id INTEGER NOT NULL REFERENCES trackings(id) ON DELETE CASCADE,
+    source      TEXT    NOT NULL,
+    article     TEXT    NOT NULL,
+    first_seen  TEXT    NOT NULL,
+    last_seen   TEXT    NOT NULL,
+    PRIMARY KEY (tracking_id, source, article)
+);
+
+CREATE TABLE IF NOT EXISTS products (
+    source    TEXT NOT NULL,
+    article   TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    seller    TEXT NOT NULL,
+    seller_id TEXT NOT NULL,
+    brand     TEXT NOT NULL,
+    url       TEXT NOT NULL,
+    PRIMARY KEY (source, article)
+);
+
+CREATE TABLE IF NOT EXISTS prices (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    source     TEXT    NOT NULL,
+    article    TEXT    NOT NULL,
+    checked_at TEXT    NOT NULL,
+    price      INTEGER,          -- копейки; NULL — нет в наличии
+    old_price  INTEGER,
+    quantity   INTEGER NOT NULL,
+    rating     REAL,
+    feedbacks  INTEGER NOT NULL,
+    sizes      TEXT              -- цены по размерам (JSON), если размеры есть
+);
+
+-- Индекс: быстро найти историю одного товара по времени
+CREATE INDEX IF NOT EXISTS prices_by_article ON prices (source, article, checked_at);
+"""
+
+
+@dataclass(frozen=True)
+class Tracking:
+    id: int
+    user_id: int
+    kind: str
+    source: str
+    target: str
+    title: str
+    target_price: int | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class PricePoint:
+    """Одна запись истории цены."""
+    checked_at: str
+    price: int | None
+    old_price: int | None
+    quantity: int
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _sizes_json(info: ProductInfo) -> str | None:
+    if not info.has_sizes:
+        return None
+    return json.dumps([{"name": s.name, "price": s.price, "quantity": s.quantity}
+                       for s in info.sizes], ensure_ascii=False)
+
+
+class Database:
+    def __init__(self, path: str):
+        self.path = path
+
+    def _connect(self):
+        return aiosqlite.connect(self.path)
+
+    async def init(self) -> None:
+        async with self._connect() as db:
+            await db.executescript(SCHEMA)
+            await db.commit()
+
+    # --- отслеживания ---
+
+    async def add_tracking(self, user_id: int, kind: str, source: str, target: str,
+                           title: str, target_price: int | None = None) -> tuple[int, bool]:
+        """Добавить отслеживание. Возвращает (id, добавлено ли новое).
+        Если такое уже есть — (id существующего, False)."""
+        if kind not in KINDS:
+            raise ValueError(f"Неизвестный вид отслеживания: {kind!r}")
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "INSERT OR IGNORE INTO trackings "
+                "(user_id, kind, source, target, title, target_price, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, kind, source, target, title, target_price, utc_now()))
+            await db.commit()
+            if cursor.rowcount:
+                return cursor.lastrowid, True
+            row = await (await db.execute(
+                "SELECT id FROM trackings WHERE user_id=? AND kind=? AND source=? AND target=?",
+                (user_id, kind, source, target))).fetchone()
+            return row[0], False
+
+    async def list_trackings(self, user_id: int | None = None) -> list[Tracking]:
+        """Отслеживания пользователя, или все (для проверки по расписанию)."""
+        query = ("SELECT id, user_id, kind, source, target, title, target_price, created_at "
+                 "FROM trackings")
+        params: tuple = ()
+        if user_id is not None:
+            query += " WHERE user_id = ?"
+            params = (user_id,)
+        async with self._connect() as db:
+            rows = await (await db.execute(query + " ORDER BY id", params)).fetchall()
+        return [Tracking(*row) for row in rows]
+
+    async def count_trackings(self, user_id: int) -> int:
+        async with self._connect() as db:
+            row = await (await db.execute(
+                "SELECT COUNT(*) FROM trackings WHERE user_id = ?", (user_id,))).fetchone()
+        return row[0]
+
+    async def remove_tracking(self, user_id: int, tracking_id: int) -> bool:
+        """Удалить. user_id в условии — чтобы нельзя было удалить чужое."""
+        async with self._connect() as db:
+            await db.execute("DELETE FROM tracking_items WHERE tracking_id = ?", (tracking_id,))
+            cursor = await db.execute("DELETE FROM trackings WHERE id = ? AND user_id = ?",
+                                      (tracking_id, user_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def update_tracking_items(self, tracking_id: int, source: str,
+                                    articles: list[str]) -> tuple[set[str], bool]:
+        """Запомнить, какие товары сейчас в магазине/выдаче.
+        Возвращает (новые артикулы, первая ли это проверка).
+        На первой проверке «новыми» оказываются все — уведомлять о них не нужно."""
+        now = utc_now()
+        async with self._connect() as db:
+            rows = await (await db.execute(
+                "SELECT article FROM tracking_items WHERE tracking_id = ?",
+                (tracking_id,))).fetchall()
+            known = {row[0] for row in rows}
+            await db.executemany(
+                "INSERT INTO tracking_items (tracking_id, source, article, first_seen, last_seen) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT (tracking_id, source, article) DO UPDATE SET last_seen = excluded.last_seen",
+                [(tracking_id, source, a, now, now) for a in articles])
+            await db.commit()
+        return set(articles) - known, not known
+
+    # --- товары и цены ---
+
+    async def last_prices(self, source: str, articles: list[str]) -> dict[str, PricePoint]:
+        """Последняя сохранённая цена каждого товара — чтобы сравнить с новой."""
+        if not articles:
+            return {}
+        marks = ",".join("?" * len(articles))
+        # Для каждого артикула берём строку с самым поздним временем проверки
+        query = f"""
+            SELECT p.article, p.checked_at, p.price, p.old_price, p.quantity
+            FROM prices p
+            JOIN (SELECT article, MAX(checked_at) AS last FROM prices
+                  WHERE source = ? AND article IN ({marks}) GROUP BY article) l
+              ON p.article = l.article AND p.checked_at = l.last
+            WHERE p.source = ?
+        """
+        async with self._connect() as db:
+            rows = await (await db.execute(query, (source, *articles, source))).fetchall()
+        return {row[0]: PricePoint(*row[1:]) for row in rows}
+
+    async def save_snapshot(self, products: list[ProductInfo], checked_at: str | None = None) -> None:
+        """Сохранить результат проверки: сведения о товарах и строку в историю цен."""
+        checked_at = checked_at or utc_now()
+        async with self._connect() as db:
+            await db.executemany(
+                "INSERT INTO products (source, article, name, seller, seller_id, brand, url) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (source, article) DO UPDATE SET name = excluded.name, "
+                "seller = excluded.seller, seller_id = excluded.seller_id, "
+                "brand = excluded.brand, url = excluded.url",
+                [(p.source, p.article, p.name, p.seller, p.seller_id, p.brand, p.url)
+                 for p in products])
+            await db.executemany(
+                "INSERT INTO prices (source, article, checked_at, price, old_price, quantity, "
+                "rating, feedbacks, sizes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(p.source, p.article, checked_at, p.price, p.old_price, p.quantity,
+                  p.rating, p.feedbacks, _sizes_json(p)) for p in products])
+            await db.commit()
+
+    async def price_history(self, source: str, article: str) -> list[PricePoint]:
+        """Вся история цены товара, от старых к новым (для графика)."""
+        async with self._connect() as db:
+            rows = await (await db.execute(
+                "SELECT checked_at, price, old_price, quantity FROM prices "
+                "WHERE source = ? AND article = ? ORDER BY checked_at",
+                (source, article))).fetchall()
+        return [PricePoint(*row) for row in rows]
