@@ -177,3 +177,36 @@ def test_product_summary(db):
     assert summary.checks == 3
     assert [s["name"] for s in summary.sizes] == ["S", "M"]
     assert summary.checked_at == "2026-10-20 16:00:00"
+
+
+# --- «новые в топе» для поиска: только закрепившиеся ---
+
+def check(db, tracking_id, articles):
+    """Одна «проверка» поиска; между проверками — секунда, как будто прошло время."""
+    import time
+    time.sleep(1.1)
+    new, _ = run(db.update_tracking_items(tracking_id, "wb", articles, confirm_twice=True))
+    return new
+
+
+def test_search_new_only_after_two_checks(db):
+    tracking_id, _ = run(db.add_tracking(111, "search", "wb", "коврик", "коврик"))
+    assert check(db, tracking_id, ["1", "2"]) == set()        # точка отсчёта
+    assert check(db, tracking_id, ["1", "3"]) == set()        # 3 появился — ждём
+    assert check(db, tracking_id, ["1", "3"]) == {"3"}        # держится вторую — новый
+    assert check(db, tracking_id, ["1", "3"]) == set()        # о нём уже сообщили
+
+
+def test_search_flicker_not_reported(db):
+    tracking_id, _ = run(db.add_tracking(111, "search", "wb", "коврик", "коврик"))
+    check(db, tracking_id, ["1"])
+    # Товар 5 «мелькает»: то есть, то нет — ни разу не две проверки подряд
+    assert check(db, tracking_id, ["1", "5"]) == set()
+    assert check(db, tracking_id, ["1"]) == set()
+    assert check(db, tracking_id, ["1", "5"]) == set()
+
+
+def test_baseline_items_not_reported_after_dropout(db):
+    tracking_id, _ = run(db.add_tracking(111, "search", "wb", "коврик", "коврик"))
+    check(db, tracking_id, ["1", "2"])
+    assert check(db, tracking_id, ["1", "2"]) == set()        # «свои» с первой проверки

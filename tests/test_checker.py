@@ -137,7 +137,8 @@ def test_same_search_requested_once_for_two_users(setup):
     db, wb, checker, sent = setup
     for user in (111, 222):
         tracking_id, _ = run(db.add_tracking(user, "search", "wb", "коврик", "коврик"))
-        run(db.update_tracking_items(tracking_id, "wb", ["1", "2"]))         # точка отсчёта
+        run(db.update_tracking_items(tracking_id, "wb", ["1", "2"],
+                                     confirm_twice=True))                 # точка отсчёта
     run(db.save_snapshot([product("1"), product("2")], "2026-10-20 10:00:00"))
 
     import time; time.sleep(1.1)
@@ -145,8 +146,13 @@ def test_same_search_requested_once_for_two_users(setup):
     assert run(checker.run()) == 2                 # по сообщению каждому
     assert wb.calls == ["search:коврик"]           # но WB спросили один раз
     text = sent[0][1]
-    assert "🆕" in text and "Коврик 3" in text     # новый товар в топе
     assert "📉" in text and "Коврик 1" in text     # снижение цены у товара 1
+    assert "🆕" not in text                        # товар 3 пока мог просто «мелькнуть»
+
+    sent.clear()
+    time.sleep(1.1)
+    run(checker.run())                             # товар 3 продержался вторую проверку
+    assert "🆕" in sent[0][1] and "Коврик 3" in sent[0][1]
 
 
 def test_check_only_own_trackings(setup):

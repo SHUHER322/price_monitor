@@ -210,8 +210,10 @@ class Checker:
                                    tracking.target_price)
             return product_message(tracking, changes) if changes else None
 
+        # Для поиска новым считаем только закрепившийся в топе товар (см. db.py)
         new_articles, first = await self.db.update_tracking_items(
-            tracking.id, "wb", [p.article for p in items])
+            tracking.id, "wb", [p.article for p in items],
+            confirm_twice=tracking.kind == "search")
         changes = []
         for p in items:
             if p.article in new_articles and not first:

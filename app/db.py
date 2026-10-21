@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS tracking_items (
     first_seen  TEXT    NOT NULL,
     last_seen   TEXT    NOT NULL,
     position    INTEGER,                    -- место в выдаче/магазине: 1, 2, 3…
+    streak      INTEGER NOT NULL DEFAULT 2, -- сколько проверок подряд товар в выдаче
     PRIMARY KEY (tracking_id, source, article)
 );
 
@@ -152,6 +153,11 @@ class Database:
                 "PRAGMA table_info(tracking_items)")).fetchall()}
             if "position" not in columns:
                 await db.execute("ALTER TABLE tracking_items ADD COLUMN position INTEGER")
+            if "streak" not in columns:
+                # Уже известные товары считаем «закрепившимися» (2), чтобы после
+                # обновления бот не объявил их все новыми
+                await db.execute("ALTER TABLE tracking_items "
+                                 "ADD COLUMN streak INTEGER NOT NULL DEFAULT 2")
             await db.commit()
 
     # --- отслеживания ---
@@ -222,27 +228,53 @@ class Database:
             await db.commit()
             return cursor.rowcount > 0
 
-    async def update_tracking_items(self, tracking_id: int, source: str,
-                                    articles: list[str]) -> tuple[set[str], bool]:
+    async def update_tracking_items(self, tracking_id: int, source: str, articles: list[str],
+                                    confirm_twice: bool = False) -> tuple[set[str], bool]:
         """Запомнить, какие товары сейчас в магазине/выдаче и на каких местах
         (порядок списка articles = порядок на сайте).
-        Возвращает (новые артикулы, первая ли это проверка).
-        На первой проверке «новыми» оказываются все — уведомлять о них не нужно."""
+
+        Возвращает (о каких товарах сообщить как о новых, первая ли это проверка).
+        На первой проверке ничего не сообщаем — это точка отсчёта.
+
+        confirm_twice — для поиска: WB перемешивает выдачу (реклама, подстройка
+        под покупателя), и товары то выпадают из топа, то возвращаются. Поэтому
+        новым считаем товар, который продержался в топе две проверки подряд.
+        Для магазина — сообщаем сразу о товаре, которого раньше не было.
+        """
         now = utc_now()
         async with self._connect() as db:
             rows = await (await db.execute(
-                "SELECT article FROM tracking_items WHERE tracking_id = ?",
+                "SELECT article, last_seen, streak FROM tracking_items WHERE tracking_id = ?",
                 (tracking_id,))).fetchall()
-            known = {row[0] for row in rows}
+            known = {article: (last_seen, streak) for article, last_seen, streak in rows}
+            first = not known
+            # Время прошлой проверки: у кого last_seen совпадает — были в выдаче и тогда
+            previous = max((last for last, _ in known.values()), default=None)
+
+            announce, values = set(), []
+            for position, article in enumerate(articles, 1):
+                if first:
+                    streak = 2                       # точка отсчёта — уже «свои»
+                elif article in known and known[article][0] == previous:
+                    streak = known[article][1] + 1   # был и в прошлый раз — серия растёт
+                else:
+                    streak = 1                       # появился (впервые или вернулся)
+                if not first:
+                    if confirm_twice and streak == 2:
+                        announce.add(article)        # вторая проверка подряд — закрепился
+                    elif not confirm_twice and article not in known:
+                        announce.add(article)        # в магазине раньше не было
+                values.append((tracking_id, source, article, now, now, position, streak))
+
             await db.executemany(
                 "INSERT INTO tracking_items "
-                "(tracking_id, source, article, first_seen, last_seen, position) "
-                "VALUES (?, ?, ?, ?, ?, ?) "
+                "(tracking_id, source, article, first_seen, last_seen, position, streak) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT (tracking_id, source, article) DO UPDATE SET "
-                "last_seen = excluded.last_seen, position = excluded.position",
-                [(tracking_id, source, a, now, now, i) for i, a in enumerate(articles, 1)])
+                "last_seen = excluded.last_seen, position = excluded.position, "
+                "streak = excluded.streak", values)
             await db.commit()
-        return set(articles) - known, not known
+        return announce, first
 
     # --- товары и цены ---
 
