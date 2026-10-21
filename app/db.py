@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS trackings (
     title        TEXT    NOT NULL,          -- что показывать в списке
     target_price INTEGER,                   -- желаемая цена в копейках (только для товара)
     created_at   TEXT    NOT NULL,
+    sizes        TEXT,                      -- выбранные размеры (JSON-список), если есть
     UNIQUE (user_id, kind, source, target)  -- одно и то же дважды не добавить
 );
 
@@ -84,6 +85,15 @@ class Tracking:
     title: str
     target_price: int | None
     created_at: str
+    sizes: tuple[str, ...] = ()   # за какими размерами следить; пусто — за любым
+
+
+TRACKING_COLUMNS = "id, user_id, kind, source, target, title, target_price, created_at, sizes"
+
+
+def _tracking(row) -> Tracking:
+    *head, sizes = row
+    return Tracking(*head, tuple(json.loads(sizes)) if sizes else ())
 
 
 @dataclass(frozen=True)
@@ -126,6 +136,7 @@ class PricePoint:
     price: int | None
     old_price: int | None
     quantity: int
+    sizes: tuple = ()   # размеры на эту проверку: ({"name", "price", "quantity"}, …)
 
 
 def utc_now() -> str:
@@ -159,6 +170,10 @@ class Database:
                 "PRAGMA table_info(prices)")).fetchall()}
             if "card_price" not in price_columns:
                 await db.execute("ALTER TABLE prices ADD COLUMN card_price INTEGER")
+            tracking_columns = {row[1] for row in await (await db.execute(
+                "PRAGMA table_info(trackings)")).fetchall()}
+            if "sizes" not in tracking_columns:
+                await db.execute("ALTER TABLE trackings ADD COLUMN sizes TEXT")
             if "streak" not in columns:
                 # Уже известные товары считаем «закрепившимися» (2), чтобы после
                 # обновления бот не объявил их все новыми
@@ -169,7 +184,8 @@ class Database:
     # --- отслеживания ---
 
     async def add_tracking(self, user_id: int, kind: str, source: str, target: str,
-                           title: str, target_price: int | None = None) -> tuple[int, bool]:
+                           title: str, target_price: int | None = None,
+                           sizes: list[str] | tuple = ()) -> tuple[int, bool]:
         """Добавить отслеживание. Возвращает (id, добавлено ли новое).
         Если такое уже есть — (id существующего, False)."""
         if kind not in KINDS:
@@ -177,9 +193,10 @@ class Database:
         async with self._connect() as db:
             cursor = await db.execute(
                 "INSERT OR IGNORE INTO trackings "
-                "(user_id, kind, source, target, title, target_price, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (user_id, kind, source, target, title, target_price, utc_now()))
+                "(user_id, kind, source, target, title, target_price, created_at, sizes) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, kind, source, target, title, target_price, utc_now(),
+                 json.dumps(list(sizes), ensure_ascii=False) if sizes else None))
             await db.commit()
             if cursor.rowcount:
                 return cursor.lastrowid, True
@@ -190,23 +207,22 @@ class Database:
 
     async def list_trackings(self, user_id: int | None = None) -> list[Tracking]:
         """Отслеживания пользователя, или все (для проверки по расписанию)."""
-        query = ("SELECT id, user_id, kind, source, target, title, target_price, created_at "
-                 "FROM trackings")
+        query = f"SELECT {TRACKING_COLUMNS} FROM trackings"
         params: tuple = ()
         if user_id is not None:
             query += " WHERE user_id = ?"
             params = (user_id,)
         async with self._connect() as db:
             rows = await (await db.execute(query + " ORDER BY id", params)).fetchall()
-        return [Tracking(*row) for row in rows]
+        return [_tracking(row) for row in rows]
 
     async def get_tracking(self, user_id: int, tracking_id: int) -> Tracking | None:
         """Одно отслеживание — только если оно принадлежит этому пользователю."""
         async with self._connect() as db:
             row = await (await db.execute(
-                "SELECT id, user_id, kind, source, target, title, target_price, created_at "
-                "FROM trackings WHERE id = ? AND user_id = ?", (tracking_id, user_id))).fetchone()
-        return Tracking(*row) if row else None
+                f"SELECT {TRACKING_COLUMNS} FROM trackings WHERE id = ? AND user_id = ?",
+                (tracking_id, user_id))).fetchone()
+        return _tracking(row) if row else None
 
     async def count_trackings(self, user_id: int) -> int:
         async with self._connect() as db:
@@ -222,6 +238,17 @@ class Database:
                 "UPDATE trackings SET target_price = ? "
                 "WHERE id = ? AND user_id = ? AND kind = 'product'",
                 (target_price, tracking_id, user_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def set_sizes(self, user_id: int, tracking_id: int, sizes: list[str]) -> bool:
+        """Выбрать размеры, за которыми следить (пустой список — за любым). Только своего."""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "UPDATE trackings SET sizes = ? "
+                "WHERE id = ? AND user_id = ? AND kind = 'product'",
+                (json.dumps(sizes, ensure_ascii=False) if sizes else None,
+                 tracking_id, user_id))
             await db.commit()
             return cursor.rowcount > 0
 
@@ -291,7 +318,7 @@ class Database:
         marks = ",".join("?" * len(articles))
         # Для каждого артикула берём строку с самым поздним временем проверки
         query = f"""
-            SELECT p.article, p.checked_at, p.price, p.old_price, p.quantity
+            SELECT p.article, p.checked_at, p.price, p.old_price, p.quantity, p.sizes
             FROM prices p
             JOIN (SELECT article, MAX(checked_at) AS last FROM prices
                   WHERE source = ? AND article IN ({marks}) GROUP BY article) l
@@ -300,7 +327,8 @@ class Database:
         """
         async with self._connect() as db:
             rows = await (await db.execute(query, (source, *articles, source))).fetchall()
-        return {row[0]: PricePoint(*row[1:]) for row in rows}
+        return {row[0]: PricePoint(*row[1:5], tuple(json.loads(row[5])) if row[5] else ())
+                for row in rows}
 
     async def save_snapshot(self, products: list[ProductInfo], checked_at: str | None = None) -> None:
         """Сохранить результат проверки: сведения о товарах и строку в историю цен."""

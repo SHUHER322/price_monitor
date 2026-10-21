@@ -3,8 +3,9 @@ import pytest
 
 from app.db import PricePoint, Tracking
 from app.db import ItemRow
-from app.formatting import (button_text, group_summary_text, ordered, parse_rubles,
-                            product_card, short, stock_text, tracking_line, trackings_text)
+from app.formatting import (button_text, chosen_sizes_line, group_summary_text, ordered,
+                            parse_rubles, product_card, short, sizes_prompt, stock_text,
+                            tracking_line, trackings_text)
 from app.sources.base import ProductInfo, SizeInfo
 
 
@@ -152,3 +153,20 @@ def test_ozon_summary_line():
     assert text.startswith("🛍 Ozon:")
     assert "по карте Ozon 3 098 ₽" in text
     assert "в наличии: есть" in text
+
+
+def test_chosen_sizes_line():
+    sizes = [{"name": "S", "price": 100, "quantity": None},
+             {"name": "M", "price": None, "quantity": 0}]
+    assert chosen_sizes_line(("S", "M", "XL"), sizes) == "S — есть, M — нет, XL — нет в списке"
+    assert "Выбрано: любой" in sizes_prompt("Куртка", [])
+    assert "Выбрано: S, M" in sizes_prompt("Куртка", ["S", "M"])
+
+
+def test_ozon_card_with_sizes():
+    info = ProductInfo(source="ozon", article="2", url="u", name="Кроссовки", price=675200,
+                       old_price=None, quantity=-1, seller="RAF SIMONS", card_price=645700,
+                       sizes=(SizeInfo("36", 645700, None, -1, "2"), SizeInfo("44", None, None, 0)))
+    card = product_card(info)
+    assert "Цена: <b>6 752 ₽</b>, по карте Ozon 6 457 ₽" in card   # обычная цена, не из размеров
+    assert "Размеры: 36 — есть; 44 — нет" in card

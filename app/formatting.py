@@ -5,7 +5,8 @@ import re
 import statistics
 
 from .db import ItemRow, PricePoint, ProductSummary, Tracking
-from .sources.base import EXACT_STOCK, OZON_CARD, SOURCE_NAMES, ProductInfo, format_price
+from .sources.base import (EXACT_STOCK, OZON_CARD, SOURCE_NAMES, ProductInfo, format_price,
+                           size_available)
 
 KIND_ICONS = {"product": "🛍", "seller": "🏪", "search": "🔍"}
 # Разделы списка «Мои отслеживания» — в этом порядке
@@ -56,7 +57,14 @@ def product_card(info: ProductInfo) -> str:
     """Карточка товара: название, цена, наличие, размеры."""
     lines = [f"<b>{esc(info.name)}</b>",
              f"{SOURCE_NAMES.get(info.source, info.source)} · продавец: {esc(info.seller)}"]
-    if info.has_sizes:
+    if info.has_sizes and info.source == "ozon":
+        # У Ozon цены размеров в виджете — по карте; показываем обычную цену товара
+        # и наличие по размерам
+        stock = "есть" if info.in_stock else "нет в наличии"
+        lines.append(f"Цена: <b>{format_price(info.price)}</b>"
+                     f"{card_price_text(info.card_price, info.source)}, в наличии: {stock}")
+        lines.append(f"Размеры: {sizes_line(size_dicts(info))}")
+    elif info.has_sizes:
         for s in info.sizes:
             if s.quantity is not None:
                 stock = stock_text(s.quantity)
@@ -166,15 +174,37 @@ def group_summary_text(tracking: Tracking, rows: list[ItemRow], checked_local: s
     return "\n".join(lines)
 
 
+def size_dicts(info: ProductInfo) -> list[dict]:
+    """Размеры товара в том виде, в каком они лежат в базе."""
+    return [{"name": s.name, "price": s.price, "quantity": s.quantity} for s in info.sizes]
+
+
+def chosen_sizes_line(chosen: tuple[str, ...] | list[str], sizes: list[dict]) -> str:
+    """'36 — есть, 38 — нет' — выбранные размеры и их наличие на последней проверке."""
+    known = {s.get("name"): size_available(s) for s in sizes}
+    parts = []
+    for name in chosen:
+        status = "есть" if known.get(name) else ("нет" if name in known else "нет в списке")
+        parts.append(f"{esc(name)} — {status}")
+    return ", ".join(parts)
+
+
+def sizes_prompt(name: str, chosen: list[str] | tuple[str, ...]) -> str:
+    """Текст над кнопками выбора размеров."""
+    picked = ", ".join(esc(n) for n in chosen) if chosen else "любой"
+    return (f"📏 <b>{esc(name[:60])}</b>\n"
+            "За какими размерами следить? Нажимайте на размеры, чтобы отметить ✅.\n"
+            "Сообщу, когда отмеченный размер появится или закончится.\n\n"
+            f"Выбрано: {picked}")
+
+
 def sizes_line(sizes: list[dict]) -> str | None:
     """[S есть, M есть, XL нет] → 'S, M — есть; XL — нет'. Без размеров — None."""
     named = [s for s in sizes if s.get("name")]
     if not named:
         return None
-    def available(s: dict) -> bool:
-        return s.get("price") is not None and s.get("quantity") != 0
-    have = [esc(s["name"]) for s in named if available(s)]
-    missing = [esc(s["name"]) for s in named if not available(s)]
+    have = [esc(s["name"]) for s in named if size_available(s)]
+    missing = [esc(s["name"]) for s in named if not size_available(s)]
     parts = []
     if have:
         parts.append(f"{', '.join(have)} — есть")
@@ -203,5 +233,9 @@ def product_summary_text(tracking: Tracking, summary: ProductSummary, checked_lo
     sizes = sizes_line(summary.sizes)
     if sizes:
         lines.append(f"Размеры: {sizes}")
+    if tracking.sizes:
+        lines.append(f"📏 Слежу за размерами: {chosen_sizes_line(tracking.sizes, summary.sizes)}")
+    elif sizes:
+        lines.append("📏 Слежу за любым размером — выбрать нужные: кнопка «📏 Размеры»")
     lines.append(f"Проверено: {checked_local}")
     return "\n".join(lines)

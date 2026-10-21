@@ -35,8 +35,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
-from .base import (OZON_CARD, UNKNOWN_STOCK, BlockedError, ProductInfo, SourceError,
-                   format_price)
+from .base import (OZON_CARD, UNKNOWN_STOCK, BlockedError, ProductInfo, SizeInfo,
+                   SourceError, format_price)
 
 log = logging.getLogger(__name__)
 
@@ -136,6 +136,33 @@ def _canonical_url(data: dict, article: str) -> str:
     return f"{SITE}/product/{article}/"
 
 
+def _text(rs: list | None) -> str:
+    """[{"type": "text", "content": "36 RU / EU37"}] → '36 RU / EU37'."""
+    return "".join(part.get("content", "") for part in rs or [] if part.get("type") == "text")
+
+
+def parse_sizes(states: dict) -> tuple[SizeInfo, ...]:
+    """Размеры из виджета webAspects (одежда, обувь). Каждый размер у Ozon —
+    отдельный товар со своим артикулом. Цена в этом виджете — по карте Ozon.
+    Цвета (тоже аспект) не берём: это уже другие товары, а не размеры."""
+    for aspect in (states.get("webAspects") or {}).get("aspects") or []:
+        if aspect.get("aspectKey") != "size" and aspect.get("type") != "sizes":
+            continue
+        sizes = []
+        for variant in aspect.get("variants") or []:
+            info = variant.get("data") or {}
+            name = _text(info.get("textRs")) or info.get("searchableText") or ""
+            available = variant.get("availability") == "inStock"
+            sizes.append(SizeInfo(
+                name=name.strip(),
+                price=parse_rubles(info.get("price")) if available else None,
+                old_price=parse_rubles(info.get("originalPrice")) if available else None,
+                quantity=UNKNOWN_STOCK if available else 0,
+                article=str(variant.get("sku") or "")))
+        return tuple(s for s in sizes if s.name)
+    return ()
+
+
 def parse_product(data: dict, article: str | None = None) -> ProductInfo:
     """Товар из ответа API страницы Ozon."""
     states = _states(data)
@@ -173,6 +200,7 @@ def parse_product(data: dict, article: str | None = None) -> ProductInfo:
         rating=float(score["totalScore"]) if feedbacks and score.get("totalScore") else None,
         feedbacks=feedbacks,
         card_price=card if card != current else None,
+        sizes=parse_sizes(states),
     )
 
 

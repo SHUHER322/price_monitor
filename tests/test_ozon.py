@@ -211,3 +211,36 @@ def test_seller_pagination_overlap():
     assert len(products) == 24                 # повторы отброшены
     assert len({p.article for p in products}) == 24
     assert calls[-1] == "/c"                   # страница без новых товаров — стоп
+
+
+SIZES_FIXTURE = Path(__file__).parent / "fixtures" / "ozon_product_sizes_5917626503.json"
+
+
+def test_sizes_parsed():
+    # Кроссовки: размеры — отдельные товары; цвета (тоже аспект) размерами не считаются
+    info = parse_product(json.loads(SIZES_FIXTURE.read_text(encoding="utf-8")), "5917626503")
+    assert info.price == 675200 and info.card_price == 645700
+    assert info.has_sizes
+    assert len(info.sizes) == 10
+    first = info.sizes[0]
+    assert first.name == "35 RU / EU36"
+    assert first.price == 645700                      # цена в виджете размеров — по карте
+    assert first.quantity == UNKNOWN_STOCK            # есть, сколько — неизвестно
+    linked = [s for s in info.sizes if s.article == info.article]
+    assert [s.name for s in linked] == ["36 RU / EU37"]   # ссылка вела на этот размер
+
+
+def test_size_out_of_stock():
+    data = json.loads(SIZES_FIXTURE.read_text(encoding="utf-8"))
+    key = next(k for k in data["widgetStates"] if k.startswith("webAspects"))
+    state = json.loads(data["widgetStates"][key])
+    sizes = next(a for a in state["aspects"] if a["aspectKey"] == "size")
+    sizes["variants"][2]["availability"] = "outOfStock"
+    data["widgetStates"][key] = json.dumps(state, ensure_ascii=False)
+    size = parse_product(data, "5917626503").sizes[2]
+    assert size.name == "37 RU / EU38"
+    assert not size.in_stock and size.price is None
+
+
+def test_product_without_sizes(page):
+    assert parse_product(page, "1291633069").sizes == ()   # микшер — без размеров

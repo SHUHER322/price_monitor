@@ -242,3 +242,41 @@ def test_migration_adds_card_price(tmp_path):
     assert "card_price" in {row[1] for row in con.execute("PRAGMA table_info(prices)")}
     assert con.execute("SELECT COUNT(*) FROM prices").fetchone() == (1,)   # данные целы
     con.close()
+
+
+def test_chosen_sizes_saved(db):
+    tracking_id, _ = run(db.add_tracking(111, "product", "ozon", "5917626503", "Кроссовки",
+                                         sizes=["36 RU / EU37"]))
+    assert run(db.get_tracking(111, tracking_id)).sizes == ("36 RU / EU37",)
+    assert run(db.set_sizes(111, tracking_id, ["36 RU / EU37", "38 RU / EU39"]))
+    assert run(db.get_tracking(111, tracking_id)).sizes == ("36 RU / EU37", "38 RU / EU39")
+    assert not run(db.set_sizes(222, tracking_id, []))         # чужое не меняется
+    assert run(db.set_sizes(111, tracking_id, []))
+    [tracking] = run(db.list_trackings(111))
+    assert tracking.sizes == ()                                # пусто — любой размер
+
+
+def test_last_prices_with_sizes(db):
+    sizes = (SizeInfo("S", 105700, None, 3), SizeInfo("M", None, None, 0))
+    run(db.save_snapshot([product(sizes=sizes)]))
+    point = run(db.last_prices("wb", ["1"]))["1"]
+    assert [s["name"] for s in point.sizes] == ["S", "M"]
+    assert point.sizes[1]["price"] is None
+
+
+def test_migration_adds_tracking_sizes(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "old.db")
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE trackings (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "user_id INTEGER NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL, "
+                "target TEXT NOT NULL, title TEXT NOT NULL, target_price INTEGER, "
+                "created_at TEXT NOT NULL, UNIQUE (user_id, kind, source, target))")
+    con.execute("INSERT INTO trackings (user_id, kind, source, target, title, created_at) "
+                "VALUES (111, 'product', 'wb', '1', 'Коврик', 'x')")
+    con.commit()
+    con.close()
+    database = Database(path)
+    run(database.init())
+    [tracking] = run(database.list_trackings(111))              # старое отслеживание цело
+    assert tracking.title == "Коврик" and tracking.sizes == ()

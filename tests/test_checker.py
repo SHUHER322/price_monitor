@@ -3,9 +3,10 @@ import asyncio
 
 import pytest
 
-from app.checker import Checker, find_changes, product_message, summary_message
+from app.checker import (Checker, change_notes, find_changes, product_message,
+                         summary_message)
 from app.db import Database, PricePoint, Tracking
-from app.sources.base import BlockedError, ProductInfo, SourceError
+from app.sources.base import BlockedError, ProductInfo, SizeInfo, SourceError
 
 
 def run(coro):
@@ -53,6 +54,49 @@ def test_out_and_back_in_stock():
 
 def test_first_time_seen_no_changes():
     assert find_changes(None, product(), 5) == []
+
+
+def sized(*available: str, price=300000) -> ProductInfo:
+    """Товар с размерами S, M, L; в наличии — перечисленные."""
+    sizes = tuple(SizeInfo(n, 300000 if n in available else None, None, None)
+                  for n in ("S", "M", "L"))
+    return ProductInfo(source="wb", article="1", name="Куртка", url="u", price=price,
+                       old_price=None, quantity=5 if available else 0, sizes=sizes)
+
+
+def sized_point(*available: str) -> PricePoint:
+    sizes = tuple({"name": n, "price": 300000 if n in available else None, "quantity": None}
+                  for n in ("S", "M", "L"))
+    return PricePoint("x", 300000, None, 5, sizes)
+
+
+def test_chosen_size_out_and_back():
+    [out] = find_changes(sized_point("S", "M"), sized("S"), 5, sizes=("M",))
+    assert out.kind == "sizes_out" and out.sizes == ("M",)
+    [back] = find_changes(sized_point("S"), sized("S", "M", "L"), 5, sizes=("M", "L"))
+    assert back.kind == "sizes_back" and back.sizes == ("M", "L")
+
+
+def test_other_sizes_ignored():
+    # Закончился S, а следим за M — молчим
+    assert find_changes(sized_point("S", "M"), sized("M"), 5, sizes=("M",)) == []
+
+
+def test_chosen_sizes_replace_product_stock():
+    # Закончились все размеры: с выбранными размерами — сообщение по размеру, а не «товар закончился»
+    assert kinds(find_changes(sized_point("M"), sized(price=None), 5, sizes=("M",))) == ["sizes_out"]
+    assert kinds(find_changes(sized_point("M"), sized(price=None), 5)) == ["out"]
+
+
+def test_sizes_without_history_no_changes():
+    # Прошлая проверка без размеров (до обновления бота) — сравнивать не с чем
+    assert find_changes(point(300000), sized("M"), 5, sizes=("M",)) == []
+
+
+def test_size_notes():
+    t = tracking()
+    changes = find_changes(sized_point("S"), sized("S", "M", "L"), 5, sizes=("M", "L"))
+    assert change_notes(t, changes) == ["✅ Появились размеры: <b>M, L</b>"]
 
 
 # --- тексты ---

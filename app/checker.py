@@ -12,6 +12,7 @@
     📉 цена снизилась больше чем на PRICE_DROP_PERCENT %
     🎯 цена опустилась до желаемой (только у товара, только в момент пересечения)
     ❌ товар закончился / ✅ снова в наличии
+    📏 выбранный размер закончился / появился (если размеры выбраны — вместо ❌ / ✅)
     🆕 новый товар в магазине или в топе поиска
 """
 import asyncio
@@ -22,7 +23,8 @@ from typing import Awaitable, Callable
 
 from .db import Database, PricePoint, Tracking
 from .formatting import esc
-from .sources.base import SOURCE_NAMES, BlockedError, ProductInfo, SourceError, format_price
+from .sources.base import (SOURCE_NAMES, BlockedError, ProductInfo, SourceError, format_price,
+                           size_available)
 
 log = logging.getLogger(__name__)
 
@@ -35,23 +37,46 @@ Notify = Callable[[int, str], Awaitable[None]]   # (user_id, текст) → о�
 
 @dataclass(frozen=True)
 class Change:
-    kind: str                  # "drop", "target", "out", "back", "new"
+    kind: str                  # "drop", "target", "out", "back", "new", "sizes_out", "sizes_back"
     product: ProductInfo
     old_price: int | None = None
     percent: int | None = None
+    sizes: tuple[str, ...] = ()   # для sizes_out / sizes_back: какие размеры
+
+
+def size_changes(old: PricePoint, new: ProductInfo, chosen: tuple[str, ...]) -> list[Change]:
+    """Какие из выбранных размеров закончились или появились.
+    Размер, который пропал из списка совсем, считаем закончившимся."""
+    if not old.sizes:          # прошлых данных по размерам нет — сравнивать не с чем
+        return []
+    was = {s.get("name"): size_available(s) for s in old.sizes}
+    now = {s.name: s.in_stock for s in new.sizes}
+    gone = tuple(n for n in chosen if was.get(n) and not now.get(n, False))
+    came = tuple(n for n in chosen if n in now and now[n] and not was.get(n, False))
+    changes = []
+    if gone:
+        changes.append(Change("sizes_out", new, old.price, sizes=gone))
+    if came:
+        changes.append(Change("sizes_back", new, old.price, sizes=came))
+    return changes
 
 
 def find_changes(old: PricePoint | None, new: ProductInfo, drop_percent: float,
-                 target_price: int | None = None) -> list[Change]:
-    """Что изменилось у товара с прошлой проверки."""
+                 target_price: int | None = None,
+                 sizes: tuple[str, ...] = ()) -> list[Change]:
+    """Что изменилось у товара с прошлой проверки. sizes — выбранные размеры:
+    тогда о наличии сообщаем по ним, а не по товару в целом."""
     if old is None:            # товара раньше не видели — сравнивать не с чем
         return []
     changes = []
-    was_in_stock = old.price is not None and old.quantity != 0
-    if was_in_stock and not new.in_stock:
-        return [Change("out", new, old.price)]
-    if not was_in_stock and new.in_stock and new.price is not None:
-        changes.append(Change("back", new, old.price))
+    if sizes:
+        changes += size_changes(old, new, sizes)
+    else:
+        was_in_stock = old.price is not None and old.quantity != 0
+        if was_in_stock and not new.in_stock:
+            return [Change("out", new, old.price)]
+        if not was_in_stock and new.in_stock and new.price is not None:
+            changes.append(Change("back", new, old.price))
     if old.price and new.price and new.price < old.price:
         percent = round((1 - new.price / old.price) * 100)
         if percent >= drop_percent:
@@ -97,6 +122,12 @@ def change_notes(tracking: Tracking, changes: list[Change]) -> list[str]:
             lines.append("❌ Товар закончился")
         elif c.kind == "back":
             lines.append(f"✅ Снова в наличии: <b>{format_price(p.price)}</b>")
+        elif c.kind == "sizes_back":
+            word = "Появился размер" if len(c.sizes) == 1 else "Появились размеры"
+            lines.append(f"✅ {word}: <b>{esc(', '.join(c.sizes))}</b>")
+        elif c.kind == "sizes_out":
+            word = "Закончился размер" if len(c.sizes) == 1 else "Закончились размеры"
+            lines.append(f"❌ {word}: {esc(', '.join(c.sizes))}")
     return lines
 
 
@@ -235,7 +266,7 @@ class Checker:
                        old: dict[tuple[str, str], PricePoint]) -> str | None:
         if tracking.kind == "product":
             changes = find_changes(old.get((tracking.source, tracking.target)), items[0],
-                                   self.drop_percent, tracking.target_price)
+                                   self.drop_percent, tracking.target_price, tracking.sizes)
             return product_message(tracking, changes) if changes else None
 
         # Для поиска новым считаем только закрепившийся в топе товар (см. db.py)

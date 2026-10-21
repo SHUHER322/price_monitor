@@ -4,6 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class AddProduct(StatesGroup):
     link = State()    # ждём ссылку на товар
+    sizes = State()   # одежда/обувь: ждём выбор размеров (кнопки под сообщением)
     price = State()   # ждём желаемую цену (или «Пропустить»)
 
 

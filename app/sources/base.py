@@ -22,6 +22,8 @@ class SizeInfo:
     # Сколько штук в наличии. None — неизвестно: в списках (поиск, магазин)
     # WB не отдаёт остатки по размерам, только в карточке одного товара
     quantity: int | None
+    # У Ozon каждый размер — отдельный товар со своим артикулом; у WB — пусто
+    article: str = ""
 
     @property
     def in_stock(self) -> bool:
@@ -65,6 +67,11 @@ class SourceError(Exception):
 
 class BlockedError(SourceError):
     """Площадка не пускает даже после обновления антибот-токена."""
+
+
+def size_available(size: dict) -> bool:
+    """Размер из базы ({"name", "price", "quantity"}) в наличии? Как SizeInfo.in_stock."""
+    return size.get("price") is not None and size.get("quantity") != 0
 
 
 def format_price(kopecks: int | None) -> str:

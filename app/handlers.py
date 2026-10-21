@@ -19,11 +19,13 @@ from .config import Config
 from .db import Database
 from .excel import build_workbook, export_filename, to_local
 from .formatting import (esc, group_summary_text, parse_rubles, product_card,
-                         product_summary_text, products_preview, trackings_text)
+                         product_summary_text, products_preview, sizes_prompt, trackings_text)
 from .keyboards import (BTN_CANCEL, BTN_LIST, BTN_PRODUCT, BTN_SEARCH, BTN_SELLER, BTN_SKIP,
                         CHART_PREFIX, DELETE_PREFIX, MARKET_BUTTONS, market_kb, EXPORT_PREFIX, LIST_CALLBACK, NO_TARGET_PREFIX,
                         RECHECK_PREFIX, TARGET_PREFIX, VIEW_PREFIX, cancel_kb, export_kb,
-                        group_kb, list_kb, main_kb, price_kb, product_kb, target_inline_kb)
+                        PICK_DONE, PICK_PREFIX, SIZE_PREFIX, SIZES_PREFIX,
+                        group_kb, list_kb, main_kb, price_kb, product_kb, sizes_kb,
+                        target_inline_kb)
 from .sources import detect, ozon, wb
 from .sources.base import BlockedError, ProductInfo, SourceError, format_price
 from .states import AddProduct, AddSearch, AddSeller, EditTarget
@@ -195,7 +197,14 @@ async def card_view(db: Database, config: Config, tracking,
                                     to_local(summary.checked_at, config.timezone))
     if notes:
         text = "\n".join(notes) + "\n\n" + text
-    return text, product_kb(tracking.id)
+    return text, product_kb(tracking.id, has_sizes=bool(size_names(summary)))
+
+
+def size_names(summary) -> list[str]:
+    """Названия размеров товара на последней проверке (пусто — размеров нет)."""
+    if summary is None:
+        return []
+    return [s["name"] for s in summary.sizes if s.get("name")]
 
 
 async def show_card_in(bot, data: dict, user_id: int, db: Database, config: Config,
@@ -256,7 +265,8 @@ async def recheck_product(callback: CallbackQuery, db: Database, config: Config,
         log.warning("Обновление товара %s: %s", tracking.target, e)
         await edit(callback.message, *await card_view(db, config, tracking, [error_text(e)]))
         return
-    changes = find_changes(old, info, config.price_drop_percent, tracking.target_price)
+    changes = find_changes(old, info, config.price_drop_percent, tracking.target_price,
+                           tracking.sizes)
     await db.save_snapshot([info])
     notes = change_notes(tracking, changes) or ["🔄 Обновлено, заметных изменений нет"]
     await edit(callback.message, *await card_view(db, config, tracking, notes))
@@ -311,6 +321,47 @@ async def remove_target(callback: CallbackQuery, state: FSMContext, db: Database
     tracking = await db.get_tracking(callback.from_user.id, tracking.id)
     await edit(callback.message, *await card_view(
         db, config, tracking, ["🚫 Цель убрана — сообщу о любом заметном снижении цены"]))
+
+
+# --- размеры отслеживаемого товара (из карточки) ---
+
+@router.callback_query(F.data.startswith(SIZES_PREFIX))
+async def open_sizes(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
+    await state.clear()
+    tracking = await own_product(callback, db, SIZES_PREFIX)
+    if tracking is None:
+        return
+    names = size_names(await db.product_summary(tracking.source, tracking.target))
+    if not names:
+        await callback.answer("У этого товара нет размеров", show_alert=True)
+        return
+    await callback.answer()
+    await edit(callback.message, sizes_prompt(tracking.title, tracking.sizes),
+               sizes_kb(names, tracking.sizes, tracking.id))
+
+
+@router.callback_query(F.data.startswith(SIZE_PREFIX))
+async def toggle_size(callback: CallbackQuery, db: Database) -> None:
+    """Отметить или снять размер — сразу сохраняется в базе."""
+    tracking_id, _, index = callback.data.removeprefix(SIZE_PREFIX).partition(":")
+    tracking = await db.get_tracking(callback.from_user.id, int(tracking_id))
+    if tracking is None:
+        await callback.answer("Это отслеживание уже удалено", show_alert=True)
+        return
+    names = size_names(await db.product_summary(tracking.source, tracking.target))
+    if not index.isdigit() or int(index) >= len(names):
+        await callback.answer("Список размеров изменился — откройте его заново", show_alert=True)
+        return
+    chosen = toggled(list(tracking.sizes), names[int(index)])
+    await db.set_sizes(callback.from_user.id, tracking.id, chosen)
+    await callback.answer()
+    await edit(callback.message, sizes_prompt(tracking.title, chosen),
+               sizes_kb(names, chosen, tracking.id))
+
+
+def toggled(chosen: list[str], name: str) -> list[str]:
+    """Отметить размер или снять отметку."""
+    return [n for n in chosen if n != name] if name in chosen else chosen + [name]
 
 
 # --- кнопки меню: начинают диалог (даже если другой не закончен) ---
@@ -378,7 +429,7 @@ async def get_product_link(message: Message, state: FSMContext, db: Database,
         if wb.SELLER_RE.search(text):
             hint = "Это ссылка на магазин — для неё нажмите «🏪 Магазин»."
         elif ozon.SELLER_RE.search(text):
-            hint = "Это ссылка на магазин Ozon — их пока можно отслеживать только по товарам."
+            hint = "Это ссылка на магазин — для неё нажмите «🏪 Магазин»."
         else:
             hint = "Это не похоже на ссылку на товар Wildberries или Ozon."
         await message.answer(f"{hint}\nПришлите ссылку на товар или нажмите «Отменить».")
@@ -398,14 +449,64 @@ async def get_product_link(message: Message, state: FSMContext, db: Database,
     # Первая точка истории цен — сразу, чтобы было с чем сравнивать
     await db.save_snapshot([info])
     await state.update_data(source=info.source, article=info.article, title=info.name,
-                            price=info.price)
+                            price=info.price, chosen=[])
+    if not info.has_sizes:
+        await message.answer(product_card(info))
+        await ask_price(message, state)
+        return
+
+    # Одежда и обувь: сначала выбор размеров. У Ozon ссылка ведёт на конкретный
+    # размер (это отдельный товар) — его отмечаем сразу
+    names = [s.name for s in info.sizes if s.name]
+    chosen = [s.name for s in info.sizes if s.article and s.article == info.article]
+    await state.update_data(sizes=names, chosen=chosen)
+    await state.set_state(AddProduct.sizes)
+    await message.answer(product_card(info))
+    await message.answer(sizes_prompt(info.name, chosen), reply_markup=sizes_kb(names, chosen))
+
+
+async def ask_price(message: Message, state: FSMContext) -> None:
     await state.set_state(AddProduct.price)
     await message.answer(
-        f"{product_card(info)}\n\n"
         "Желаемая цена? Напишите сумму в рублях, например <b>2500</b> — "
         "сообщу, когда цена опустится до неё.\n"
         "Или нажмите «Пропустить» — тогда сообщу о любом заметном снижении.",
         reply_markup=price_kb)
+
+
+@router.callback_query(AddProduct.sizes, F.data.startswith(PICK_PREFIX))
+async def pick_size(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    names, index = data["sizes"], callback.data.removeprefix(PICK_PREFIX)
+    if not index.isdigit() or int(index) >= len(names):
+        await callback.answer()
+        return
+    chosen = toggled(data["chosen"], names[int(index)])
+    await state.update_data(chosen=chosen)
+    await callback.answer()
+    await edit(callback.message, sizes_prompt(data["title"], chosen), sizes_kb(names, chosen))
+
+
+@router.callback_query(AddProduct.sizes, F.data == PICK_DONE)
+async def sizes_done(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    await callback.answer()
+    picked = ", ".join(esc(n) for n in data["chosen"]) if data["chosen"] else "любой"
+    # Кнопки убираем: выбор сделан, дальше — вопрос о цене
+    await edit(callback.message, f"📏 Размеры: <b>{picked}</b>", None)
+    await ask_price(callback.message, state)
+
+
+@router.callback_query(F.data.startswith(PICK_PREFIX) | (F.data == PICK_DONE))
+async def pick_outdated(callback: CallbackQuery) -> None:
+    """Нажали на кнопки размеров после отмены или уже добавленного товара."""
+    await callback.answer("Этот выбор уже неактуален — добавьте товар заново", show_alert=True)
+
+
+@router.message(AddProduct.sizes)
+async def sizes_by_text(message: Message) -> None:
+    await message.answer("Отметьте размеры кнопками под сообщением и нажмите «✔️ Готово». "
+                         "Ничего не отмечено — слежу за любым размером.")
 
 
 @router.message(AddProduct.price, F.text)
@@ -421,13 +522,16 @@ async def get_product_price(message: Message, state: FSMContext, db: Database) -
 
     data = await state.get_data()
     await state.clear()
+    chosen = data.get("chosen") or []
     _, created = await db.add_tracking(message.from_user.id, "product", data["source"],
-                                       data["article"], data["title"], target_price)
+                                       data["article"], data["title"], target_price, chosen)
     if not created:
         await message.answer("Этот товар уже отслеживается.", reply_markup=main_kb)
         return
     goal = f"\nЖелаемая цена: {format_price(target_price)}" if target_price else ""
-    await message.answer(f"✅ Слежу за товаром «{esc(data['title'][:60])}»{goal}",
+    sizes = (f"\nРазмеры: {esc(', '.join(chosen))} — сообщу, когда появятся или закончатся"
+             if chosen else "")
+    await message.answer(f"✅ Слежу за товаром «{esc(data['title'][:60])}»{goal}{sizes}",
                          reply_markup=main_kb)
 
 

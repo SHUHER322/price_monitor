@@ -23,6 +23,10 @@ TARGET_PREFIX = "target:"   # изменить желаемую цену
 RECHECK_PREFIX = "recheck:" # обновить данные товара с WB
 NO_TARGET_PREFIX = "notarget:"  # убрать желаемую цену
 CHART_PREFIX = "chart:"     # график истории цены
+SIZES_PREFIX = "sizes:"     # открыть выбор размеров отслеживаемого товара
+SIZE_PREFIX = "sz:"         # sz:<id>:<номер размера> — отметить/снять размер в карточке
+PICK_PREFIX = "pick:"       # pick:<номер размера> — отметить размер при добавлении товара
+PICK_DONE = "pickdone"      # размеры при добавлении выбраны
 LIST_CALLBACK = "list"      # вернуться к списку отслеживаний
 
 main_kb = ReplyKeyboardMarkup(
@@ -50,15 +54,39 @@ price_kb = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-def product_kb(tracking_id: int) -> InlineKeyboardMarkup:
-    """Кнопки под карточкой товара. Всё меняется в том же сообщении."""
+def product_kb(tracking_id: int, has_sizes: bool = False) -> InlineKeyboardMarkup:
+    """Кнопки под карточкой товара. Всё меняется в том же сообщении.
+    «📏 Размеры» — только у товаров с размерами (одежда, обувь)."""
+    last = [InlineKeyboardButton(text="◀️ К списку", callback_data=LIST_CALLBACK)]
+    if has_sizes:
+        last.insert(0, InlineKeyboardButton(text="📏 Размеры",
+                                            callback_data=f"{SIZES_PREFIX}{tracking_id}"))
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎯 Изменить цель", callback_data=f"{TARGET_PREFIX}{tracking_id}"),
          InlineKeyboardButton(text="🔄 Обновить", callback_data=f"{RECHECK_PREFIX}{tracking_id}")],
         [InlineKeyboardButton(text="📈 График", callback_data=f"{CHART_PREFIX}{tracking_id}"),
          InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{DELETE_PREFIX}{tracking_id}")],
-        [InlineKeyboardButton(text="◀️ К списку", callback_data=LIST_CALLBACK)],
+        last,
     ])
+
+
+def sizes_kb(names: list[str], chosen: list[str] | tuple[str, ...],
+             tracking_id: int | None = None) -> InlineKeyboardMarkup:
+    """Кнопки-переключатели размеров: ✅ — отмечен. По 3 в ряд.
+    tracking_id=None — выбор при добавлении товара (товара в базе ещё нет).
+    В callback_data — номер размера в списке: название может не влезть в 64 байта."""
+    buttons = []
+    for i, name in enumerate(names):
+        mark = "✅" if name in chosen else "◻️"
+        data = f"{PICK_PREFIX}{i}" if tracking_id is None else f"{SIZE_PREFIX}{tracking_id}:{i}"
+        buttons.append(InlineKeyboardButton(text=f"{mark} {name}", callback_data=data))
+    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+    if tracking_id is None:
+        rows.append([InlineKeyboardButton(text="✔️ Готово", callback_data=PICK_DONE)])
+    else:
+        rows.append([InlineKeyboardButton(text="✔️ Готово",
+                                          callback_data=f"{VIEW_PREFIX}{tracking_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def target_inline_kb(tracking_id: int, has_target: bool) -> InlineKeyboardMarkup:
