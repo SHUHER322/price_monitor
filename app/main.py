@@ -19,6 +19,7 @@ from .checker import Checker
 from .config import load_config
 from .db import Database
 from .handlers import router
+from .sources.ozon import OzonSource
 from .sources.wb import WBSource
 
 log = logging.getLogger(__name__)
@@ -44,8 +45,12 @@ async def main() -> None:
 
     db = Database(config.db_path)
     await db.init()
-    wb_source = WBSource(data_dir / "wb_session.json", data_dir / "wb_browser_profile",
-                         dest=config.wb_dest)
+    # Маркетплейсы: у каждого свой модуль и свой профиль браузера
+    sources = {
+        "wb": WBSource(data_dir / "wb_session.json", data_dir / "wb_browser_profile",
+                       dest=config.wb_dest),
+        "ozon": OzonSource(data_dir / "ozon_browser_profile"),
+    }
 
     # link_preview_is_disabled — без огромных превью ссылок в уведомлениях
     bot = Bot(config.bot_token, default=DefaultBotProperties(parse_mode="HTML",
@@ -61,7 +66,7 @@ async def main() -> None:
             log.warning("Не отправилось %s: %s", user_id, e)
         await asyncio.sleep(0.1)  # Telegram ограничивает частоту сообщений
 
-    checker = Checker(db, wb_source, notify, drop_percent=config.price_drop_percent,
+    checker = Checker(db, sources, notify, drop_percent=config.price_drop_percent,
                       search_limit=config.search_limit, seller_limit=config.seller_limit)
 
     async def scheduled_check() -> None:
@@ -79,7 +84,7 @@ async def main() -> None:
                       max_instances=1, coalesce=True, misfire_grace_time=3600)
 
     # Всё, что передано в Dispatcher, aiogram подставит в обработчики по имени аргумента
-    dp = Dispatcher(storage=MemoryStorage(), db=db, config=config, wb_source=wb_source,
+    dp = Dispatcher(storage=MemoryStorage(), db=db, config=config, sources=sources,
                     checker=checker)
     access = AccessMiddleware(config.allowed_users)
     dp.message.outer_middleware(access)

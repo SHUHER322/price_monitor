@@ -210,3 +210,35 @@ def test_baseline_items_not_reported_after_dropout(db):
     tracking_id, _ = run(db.add_tracking(111, "search", "wb", "коврик", "коврик"))
     check(db, tracking_id, ["1", "2"])
     assert check(db, tracking_id, ["1", "2"]) == set()        # «свои» с первой проверки
+
+
+
+# --- Ozon: цена по карте и ссылки ---
+
+def test_card_price_and_urls(db):
+    info = ProductInfo(source="ozon", article="777", url="https://www.ozon.ru/product/mikser-777/",
+                       name="Микшер", price=342700, old_price=None, quantity=1,
+                       card_price=309800)
+    run(db.save_snapshot([info]))
+    assert run(db.product_summary("ozon", "777")).card_price == 309800
+    assert run(db.product_urls("ozon", ["777", "1"])) == {
+        "777": "https://www.ozon.ru/product/mikser-777/"}
+    assert run(db.product_urls("ozon", [])) == {}
+
+
+def test_migration_adds_card_price(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "old.db")
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE prices (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, "
+                "article TEXT NOT NULL, checked_at TEXT NOT NULL, price INTEGER, old_price INTEGER, "
+                "quantity INTEGER NOT NULL, rating REAL, feedbacks INTEGER NOT NULL, sizes TEXT)")
+    con.execute("INSERT INTO prices (source, article, checked_at, price, quantity, feedbacks) "
+                "VALUES ('wb', '1', 'x', 100, 1, 0)")
+    con.commit()
+    con.close()
+    run(Database(path).init())
+    con = sqlite3.connect(path)
+    assert "card_price" in {row[1] for row in con.execute("PRAGMA table_info(prices)")}
+    assert con.execute("SELECT COUNT(*) FROM prices").fetchone() == (1,)   # данные целы
+    con.close()

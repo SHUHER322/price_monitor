@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS prices (
     quantity   INTEGER NOT NULL,
     rating     REAL,
     feedbacks  INTEGER NOT NULL,
-    sizes      TEXT              -- цены по размерам (JSON), если размеры есть
+    sizes      TEXT,             -- цены по размерам (JSON), если размеры есть
+    card_price INTEGER           -- цена по карте маркетплейса (Ozon), копейки
 );
 
 -- Индекс: быстро найти историю одного товара по времени
@@ -115,6 +116,7 @@ class ProductSummary:
     min_price: int | None      # за всё время отслеживания
     max_price: int | None
     checks: int                # сколько раз проверяли
+    card_price: int | None = None  # цена по карте (Ozon) на последней проверке
 
 
 @dataclass(frozen=True)
@@ -153,6 +155,10 @@ class Database:
                 "PRAGMA table_info(tracking_items)")).fetchall()}
             if "position" not in columns:
                 await db.execute("ALTER TABLE tracking_items ADD COLUMN position INTEGER")
+            price_columns = {row[1] for row in await (await db.execute(
+                "PRAGMA table_info(prices)")).fetchall()}
+            if "card_price" not in price_columns:
+                await db.execute("ALTER TABLE prices ADD COLUMN card_price INTEGER")
             if "streak" not in columns:
                 # Уже известные товары считаем «закрепившимися» (2), чтобы после
                 # обновления бот не объявил их все новыми
@@ -310,9 +316,9 @@ class Database:
                  for p in products])
             await db.executemany(
                 "INSERT INTO prices (source, article, checked_at, price, old_price, quantity, "
-                "rating, feedbacks, sizes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "rating, feedbacks, sizes, card_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [(p.source, p.article, checked_at, p.price, p.old_price, p.quantity,
-                  p.rating, p.feedbacks, _sizes_json(p)) for p in products])
+                  p.rating, p.feedbacks, _sizes_json(p), p.card_price) for p in products])
             await db.commit()
 
     async def price_history(self, source: str, article: str) -> list[PricePoint]:
@@ -358,7 +364,7 @@ class Database:
         async with self._connect() as db:
             last = await (await db.execute(
                 "SELECT p.name, p.url, pr.price, pr.old_price, pr.quantity, pr.sizes, "
-                "pr.checked_at FROM products p "
+                "pr.checked_at, pr.card_price FROM products p "
                 "JOIN prices pr ON pr.source = p.source AND pr.article = p.article "
                 "WHERE p.source = ? AND p.article = ? ORDER BY pr.id DESC LIMIT 1",
                 (source, article))).fetchone()
@@ -368,6 +374,18 @@ class Database:
             stats = await (await db.execute(
                 "SELECT MIN(price), MAX(price), COUNT(*) FROM prices "
                 "WHERE source = ? AND article = ?", (source, article))).fetchone()
-        name, url, price, old_price, quantity, sizes, checked_at = last
+        name, url, price, old_price, quantity, sizes, checked_at, card_price = last
         return ProductSummary(name, url, price, old_price, quantity,
-                              json.loads(sizes) if sizes else [], checked_at, *stats)
+                              json.loads(sizes) if sizes else [], checked_at, *stats,
+                              card_price=card_price)
+
+    async def product_urls(self, source: str, articles: list[str]) -> dict[str, str]:
+        """Ссылки на товары из базы — Ozon запрашивает товар по ссылке, а не по артикулу."""
+        if not articles:
+            return {}
+        marks = ",".join("?" * len(articles))
+        async with self._connect() as db:
+            rows = await (await db.execute(
+                f"SELECT article, url FROM products WHERE source = ? AND article IN ({marks})",
+                (source, *articles))).fetchall()
+        return dict(rows)

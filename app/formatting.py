@@ -4,7 +4,7 @@ import html
 import re
 
 from .db import PricePoint, ProductSummary, Tracking
-from .sources.base import ProductInfo, format_price
+from .sources.base import EXACT_STOCK, SOURCE_NAMES, ProductInfo, format_price
 
 KIND_ICONS = {"product": "🛍", "seller": "🏪", "search": "🔍"}
 MAX_RUBLES = 10_000_000  # больше — скорее опечатка
@@ -28,9 +28,18 @@ def parse_rubles(text: str) -> int | None:
     return round(rubles * 100)
 
 
-def stock_text(quantity: int) -> str:
-    """11 → '11 шт.', 0 → 'нет'."""
-    return f"{quantity} шт." if quantity else "нет"
+def stock_text(quantity: int, source: str = "wb") -> str:
+    """11 → '11 шт.', 0 → 'нет'. У Ozon количества нет — только 'есть'."""
+    if not quantity:
+        return "нет"
+    return f"{quantity} шт." if source in EXACT_STOCK else "есть"
+
+
+def card_price_text(card_price: int | None, source: str) -> str:
+    """', по карте Ozon 3 098 ₽' — если цена по карте есть и отличается."""
+    if not card_price:
+        return ""
+    return f", по карте {SOURCE_NAMES.get(source, source)} {format_price(card_price)}"
 
 
 def esc(text: str) -> str:
@@ -42,7 +51,7 @@ def esc(text: str) -> str:
 def product_card(info: ProductInfo) -> str:
     """Карточка товара: название, цена, наличие, размеры."""
     lines = [f"<b>{esc(info.name)}</b>",
-             f"Продавец: {esc(info.seller)}"]
+             f"{SOURCE_NAMES.get(info.source, info.source)} · продавец: {esc(info.seller)}"]
     if info.has_sizes:
         for s in info.sizes:
             if s.quantity is not None:
@@ -51,8 +60,9 @@ def product_card(info: ProductInfo) -> str:
                 stock = "есть" if s.in_stock else "нет"
             lines.append(f"• {esc(s.name)}: {format_price(s.price)} ({stock})")
     else:
-        stock = stock_text(info.quantity) if info.in_stock else "нет в наличии"
-        lines.append(f"Цена: <b>{format_price(info.price)}</b>, в наличии: {stock}")
+        stock = stock_text(info.quantity, info.source) if info.in_stock else "нет в наличии"
+        lines.append(f"Цена: <b>{format_price(info.price)}</b>"
+                     f"{card_price_text(info.card_price, info.source)}, в наличии: {stock}")
     return "\n".join(lines)
 
 
@@ -70,7 +80,8 @@ def tracking_line(number: int, tracking: Tracking, last: PricePoint | None = Non
     icon = KIND_ICONS.get(tracking.kind, "•")
     title = esc(tracking.title[:60])
     if tracking.kind == "product":
-        parts = [f"{number}. {icon} {title}"]
+        market = SOURCE_NAMES.get(tracking.source, tracking.source)
+        parts = [f"{number}. {icon} {market}: {title}"]
         if last is not None:
             parts.append(f"сейчас {format_price(last.price)}")
         if tracking.target_price:
@@ -81,13 +92,15 @@ def tracking_line(number: int, tracking: Tracking, last: PricePoint | None = Non
     return f"{number}. {icon} Поиск «{title}»"
 
 
-def trackings_text(trackings: list[Tracking], last_prices: dict[str, PricePoint]) -> str:
+def trackings_text(trackings: list[Tracking],
+                   last_prices: dict[tuple[str, str], PricePoint]) -> str:
+    """last_prices — по ключу (маркетплейс, артикул)."""
     if not trackings:
         return ("Пока ничего не отслеживается.\n"
                 "Выберите в меню, за чем следить: товар, магазин или поиск.")
     lines = ["<b>Мои отслеживания:</b>"]
     for i, t in enumerate(trackings, 1):
-        last = last_prices.get(t.target) if t.kind == "product" else None
+        last = last_prices.get((t.source, t.target)) if t.kind == "product" else None
         lines.append(tracking_line(i, t, last))
     lines.append("\n🔎 — подробнее о товаре, 📊 — выгрузить магазин или поиск в Excel, "
                  "🗑 — убрать из отслеживания.")
@@ -113,11 +126,13 @@ def sizes_line(sizes: list[dict]) -> str | None:
 
 def product_summary_text(tracking: Tracking, summary: ProductSummary, checked_local: str) -> str:
     """Карточка отслеживаемого товара (по данным из нашей базы)."""
-    lines = [f'🛍 <a href="{summary.url}">{esc(summary.name)}</a>']
+    market = SOURCE_NAMES.get(tracking.source, tracking.source)
+    lines = [f'🛍 {market}: <a href="{summary.url}">{esc(summary.name)}</a>']
     if summary.price is not None:
         old = f" (без скидки {format_price(summary.old_price)})" if summary.old_price else ""
-        lines.append(f"Сейчас: <b>{format_price(summary.price)}</b>{old}, "
-                     f"в наличии: {stock_text(summary.quantity)}")
+        card = card_price_text(summary.card_price, tracking.source)
+        lines.append(f"Сейчас: <b>{format_price(summary.price)}</b>{card}{old}, "
+                     f"в наличии: {stock_text(summary.quantity, tracking.source)}")
     else:
         lines.append("Сейчас: <b>нет в наличии</b>")
     lines.append(f"Желаемая цена: {format_price(tracking.target_price)}"

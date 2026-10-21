@@ -32,7 +32,7 @@ def tracking(kind="product", title="Коврик", target_price=None) -> Trackin
 def test_product_line_with_price_and_goal():
     last = PricePoint("2026-10-20 10:00:00", 276300, 650300, 11)
     line = tracking_line(1, tracking(target_price=250000), last)
-    assert line == "1. 🛍 Коврик — сейчас 2 763 ₽ — цель 2 500 ₽"
+    assert line == "1. 🛍 WB: Коврик — сейчас 2 763 ₽ — цель 2 500 ₽"
 
 
 def test_seller_and_search_lines():
@@ -96,3 +96,24 @@ def test_product_summary_text_out_of_stock_no_goal():
     assert "нет в наличии" in text
     assert "не задана" in text
     assert "мин" not in text                        # одна проверка — разброса ещё нет
+
+
+def test_ozon_stock_and_card_price():
+    assert stock_text(1, "ozon") == "есть"        # у Ozon нет количества
+    assert stock_text(0, "ozon") == "нет"
+    info = ProductInfo(source="ozon", article="1", url="u", name="Микшер", price=342700,
+                       old_price=1099000, quantity=1, seller="Ридберг", card_price=309800)
+    card = product_card(info)
+    assert "Ozon · продавец: Ридберг" in card
+    assert "Цена: <b>3 427 ₽</b>, по карте Ozon 3 098 ₽, в наличии: есть" in card
+
+
+def test_ozon_summary_line():
+    t = Tracking(id=1, user_id=111, kind="product", source="ozon", target="1", title="Микшер",
+                 target_price=None, created_at="x")
+    summary = ProductSummary("Микшер", "https://ozon/1", 342700, 1099000, 1, [], "x",
+                             342700, 342700, 1, card_price=309800)
+    text = product_summary_text(t, summary, "—")
+    assert text.startswith("🛍 Ozon:")
+    assert "по карте Ozon 3 098 ₽" in text
+    assert "в наличии: есть" in text

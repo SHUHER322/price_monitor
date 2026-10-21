@@ -104,6 +104,27 @@ class FakeWB:
         return []
 
 
+class FakeOzon:
+    """Поддельный Ozon: товар запрашивается по ссылке, как у настоящего."""
+    def __init__(self):
+        self.products: dict[str, ProductInfo] = {}
+        self.urls: list[str] = []
+        self.error: Exception | None = None
+
+    async def fetch_many(self, urls):
+        self.urls += urls
+        if self.error:
+            raise self.error
+        return [self.products[u.rstrip("/").rsplit("/", 1)[-1]] for u in urls
+                if u.rstrip("/").rsplit("/", 1)[-1] in self.products]
+
+
+def ozon_product(article="777", price=342700) -> ProductInfo:
+    return ProductInfo(source="ozon", article=article, name=f"Микшер {article}",
+                       url=f"https://www.ozon.ru/product/{article}/", price=price,
+                       old_price=None, quantity=1, seller="Ридберг")
+
+
 @pytest.fixture
 def setup(tmp_path):
     db = Database(str(tmp_path / "test.db"))
@@ -114,8 +135,8 @@ def setup(tmp_path):
     async def notify(user_id, text):
         sent.append((user_id, text))
 
-    checker = Checker(db, wb, notify, drop_percent=5, search_limit=30, seller_limit=500,
-                      pause=(0, 0))
+    checker = Checker(db, {"wb": wb, "ozon": FakeOzon()}, notify, drop_percent=5,
+                      search_limit=30, seller_limit=500, pause=(0, 0))
     return db, wb, checker, sent
 
 
@@ -183,3 +204,38 @@ def test_one_failed_request_does_not_stop_others(setup):
     wb.searches["коврик"] = [product("2", 200000)]
     assert run(checker.run()) == 1                 # …а поиск проверился
     assert "Поиск «коврик»" in sent[0][1]
+
+
+def test_ozon_checked_by_url_from_db(setup):
+    db, wb, checker, sent = setup
+    ozon = checker.sources["ozon"]
+    run(db.add_tracking(111, "product", "ozon", "777", "Микшер"))
+    run(db.save_snapshot([ozon_product("777", 342700)], "2026-10-20 10:00:00"))
+    ozon.products["777"] = ozon_product("777", 300000)
+    assert run(checker.run()) == 1
+    assert ozon.urls == ["https://www.ozon.ru/product/777/"]   # ссылка взята из базы
+    assert sent[0][1].startswith("Ozon:")
+    assert "снизилась на 12%" in sent[0][1]
+
+
+def test_ozon_blocked_does_not_stop_wb(setup):
+    db, wb, checker, sent = setup
+    checker.sources["ozon"].error = BlockedError("Ozon не пускает")
+    run(db.add_tracking(111, "product", "ozon", "777", "Микшер"))
+    run(db.add_tracking(111, "product", "wb", "1", "Коврик"))
+    run(db.save_snapshot([ozon_product("777"), product("1", 300000)], "2026-10-20 10:00:00"))
+    wb.products["1"] = product("1", 200000)
+    assert run(checker.run()) == 1                 # WB проверился, хотя Ozon не пустил
+    assert sent[0][1].startswith("WB:")
+
+
+def test_same_article_on_two_marketplaces_not_mixed(setup):
+    db, wb, checker, sent = setup
+    run(db.add_tracking(111, "product", "wb", "777", "Коврик WB"))
+    run(db.add_tracking(111, "product", "ozon", "777", "Микшер Ozon"))
+    run(db.save_snapshot([product("777", 100000), ozon_product("777", 342700)],
+                         "2026-10-20 10:00:00"))
+    wb.products["777"] = product("777", 100000)               # на WB цена та же
+    checker.sources["ozon"].products["777"] = ozon_product("777", 300000)   # на Ozon упала
+    assert run(checker.run()) == 1
+    assert sent[0][1].startswith("Ozon:")

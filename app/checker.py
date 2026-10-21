@@ -2,8 +2,9 @@
 
 Один проход проверки:
 1. Берём все отслеживания из базы.
-2. Собираем, что нужно спросить у WB. Одинаковое не спрашиваем дважды: если два
-   пользователя следят за одним магазином — это один запрос.
+2. Собираем, что нужно спросить у маркетплейсов (WB, Ozon). Одинаковое не
+   спрашиваем дважды: если два пользователя следят за одним магазином — это один
+   запрос. Если один маркетплейс не пускает, второй всё равно проверяется.
 3. Сравниваем новые цены с последними сохранёнными и находим изменения.
 4. Сохраняем новые цены в историю и рассылаем уведомления.
 
@@ -21,13 +22,13 @@ from typing import Awaitable, Callable
 
 from .db import Database, PricePoint, Tracking
 from .formatting import esc
-from .sources.base import BlockedError, ProductInfo, SourceError, format_price
-from .sources.wb import WBSource
+from .sources.base import SOURCE_NAMES, BlockedError, ProductInfo, SourceError, format_price
 
 log = logging.getLogger(__name__)
 
 MAX_LINES = 10                 # столько изменений в одном сообщении, остальное — «и ещё N»
 PAUSE_BETWEEN = (2.0, 5.0)     # пауза между запросами к WB, секунды
+Key = tuple[str, str, str]     # (вид, маркетплейс, цель): ("product", "ozon", "1291633069")
 
 Notify = Callable[[int, str], Awaitable[None]]   # (user_id, текст) → отправить
 
@@ -101,7 +102,9 @@ def change_notes(tracking: Tracking, changes: list[Change]) -> list[str]:
 
 def product_message(tracking: Tracking, changes: list[Change]) -> str:
     """Уведомление по одному отслеживаемому товару."""
-    return "\n".join([_link(changes[0].product, 100), *change_notes(tracking, changes)])
+    product = changes[0].product
+    market = SOURCE_NAMES.get(product.source, product.source)
+    return "\n".join([f"{market}: {_link(product, 100)}", *change_notes(tracking, changes)])
 
 
 def summary_message(tracking: Tracking, changes: list[Change]) -> str:
@@ -118,10 +121,12 @@ def summary_message(tracking: Tracking, changes: list[Change]) -> str:
 
 
 class Checker:
-    def __init__(self, db: Database, wb: WBSource, notify: Notify, drop_percent: float,
+    def __init__(self, db: Database, sources: dict, notify: Notify, drop_percent: float,
                  search_limit: int, seller_limit: int, pause: tuple[float, float] = PAUSE_BETWEEN):
+        """sources — {"wb": WBSource, "ozon": OzonSource}: у каждого есть fetch_many,
+        у WB ещё search и seller."""
         self.db = db
-        self.wb = wb
+        self.sources = sources
         self.notify = notify
         self.drop_percent = drop_percent
         self.search_limit = search_limit
@@ -146,20 +151,19 @@ class Checker:
             if not trackings:
                 return 0
             log.info("Проверка: %d отслеживаний", len(trackings))
-            try:
-                fetched = await self._fetch(trackings)
-            except BlockedError as e:
-                # WB не пускает — нет смысла долбить дальше, попробуем в следующий раз
-                log.warning("Проверка прервана: %s", e)
-                return 0
+            fetched = await self._fetch(trackings)
 
             # Старые цены — до сохранения новых, иначе сравнивать будет не с чем
-            all_products = {p.article: p for items in fetched.values() for p in items}
-            old = await self.db.last_prices("wb", list(all_products))
+            all_products = {(p.source, p.article): p for items in fetched.values() for p in items}
+            old: dict[tuple[str, str], PricePoint] = {}
+            for source in {source for source, _ in all_products}:
+                articles = [a for s, a in all_products if s == source]
+                for article, point in (await self.db.last_prices(source, articles)).items():
+                    old[(source, article)] = point
 
             sent = 0
             for t in trackings:
-                items = fetched.get((t.kind, t.target))
+                items = fetched.get((t.kind, t.source, t.target))
                 if items is None:      # этот запрос не удался — пропускаем
                     continue
                 text = await self._message(t, items, old)
@@ -170,44 +174,67 @@ class Checker:
             log.info("Проверка закончена: товаров %d, уведомлений %d", len(all_products), sent)
             return sent
 
-    async def _fetch(self, trackings: list[Tracking]) -> dict[tuple[str, str], list[ProductInfo]]:
-        """Спросить у WB всё нужное — каждый магазин и запрос один раз,
-        отдельные товары — пачками по 100. Ошибка одного запроса не роняет остальные."""
-        result: dict[tuple[str, str], list[ProductInfo]] = {}
-        articles = sorted({t.target for t in trackings if t.kind == "product"})
-        if articles:
-            try:
-                found = {p.article: p for p in await self.wb.fetch_many(articles)}
-                for article in articles:
-                    if article in found:
-                        result[("product", article)] = [found[article]]
-                    else:
-                        log.info("Товар %s не найден на WB (удалён?)", article)
-            except BlockedError:
-                raise
-            except SourceError as e:
-                log.warning("Товары: %s", e)
+    async def _fetch_products(self, source: str, articles: list[str]) -> list[ProductInfo]:
+        if source == "wb":
+            return await self.sources["wb"].fetch_many(articles)   # пачками по 100
+        # Ozon запрашивает товар по ссылке — берём её из базы (или артикул, если нет)
+        urls = await self.db.product_urls(source, articles)
+        return await self.sources[source].fetch_many([urls.get(a, a) for a in articles])
 
+    async def _fetch(self, trackings: list[Tracking]) -> dict[Key, list[ProductInfo]]:
+        """Спросить у маркетплейсов всё нужное: товары — по маркетплейсам за раз,
+        каждый магазин и поиск — один раз. Ошибка одного запроса не роняет остальные,
+        а если маркетплейс не пускает — дальше его не трогаем до следующей проверки."""
+        result: dict[Key, list[ProductInfo]] = {}
+        blocked: set[str] = set()
+
+        products = [t for t in trackings if t.kind == "product"]
+        for source in sorted({t.source for t in products}):
+            if source not in self.sources:
+                log.warning("Нет источника %r — пропускаю", source)
+                continue
+            articles = sorted({t.target for t in products if t.source == source})
+            try:
+                found = {p.article: p for p in await self._fetch_products(source, articles)}
+            except BlockedError as e:
+                log.warning("%s не пускает: %s", source, e)
+                blocked.add(source)
+                continue
+            except SourceError as e:
+                log.warning("Товары %s: %s", source, e)
+                continue
+            for article in articles:
+                if article in found:
+                    result[("product", source, article)] = [found[article]]
+                else:
+                    log.info("Товар %s %s не найден (удалён?)", source, article)
+
+        # Магазины и поиск пока есть только у WB
+        wb = self.sources.get("wb")
         for kind in ("seller", "search"):
-            for target in sorted({t.target for t in trackings if t.kind == kind}):
+            for target in sorted({t.target for t in trackings
+                                  if t.kind == kind and t.source == "wb"}):
+                if "wb" in blocked or wb is None:
+                    break
                 await self._sleep()
                 try:
                     if kind == "seller":
-                        items = await self.wb.seller(target, limit=self.seller_limit)
+                        items = await wb.seller(target, limit=self.seller_limit)
                     else:
-                        items = await self.wb.search(target, limit=self.search_limit)
-                    result[(kind, target)] = items
-                except BlockedError:
-                    raise
+                        items = await wb.search(target, limit=self.search_limit)
+                    result[(kind, "wb", target)] = items
+                except BlockedError as e:
+                    log.warning("wb не пускает: %s", e)
+                    blocked.add("wb")
                 except SourceError as e:
                     log.warning("%s %r: %s", kind, target, e)
         return result
 
     async def _message(self, tracking: Tracking, items: list[ProductInfo],
-                       old: dict[str, PricePoint]) -> str | None:
+                       old: dict[tuple[str, str], PricePoint]) -> str | None:
         if tracking.kind == "product":
-            changes = find_changes(old.get(tracking.target), items[0], self.drop_percent,
-                                   tracking.target_price)
+            changes = find_changes(old.get((tracking.source, tracking.target)), items[0],
+                                   self.drop_percent, tracking.target_price)
             return product_message(tracking, changes) if changes else None
 
         # Для поиска новым считаем только закрепившийся в топе товар (см. db.py)
@@ -219,5 +246,5 @@ class Checker:
             if p.article in new_articles and not first:
                 changes.append(Change("new", p))
             else:
-                changes += find_changes(old.get(p.article), p, self.drop_percent)
+                changes += find_changes(old.get((p.source, p.article)), p, self.drop_percent)
         return summary_message(tracking, changes) if changes else None

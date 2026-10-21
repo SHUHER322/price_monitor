@@ -24,26 +24,27 @@ from .keyboards import (BTN_CANCEL, BTN_LIST, BTN_PRODUCT, BTN_SEARCH, BTN_SELLE
                         CHART_PREFIX, DELETE_PREFIX, EXPORT_PREFIX, LIST_CALLBACK, NO_TARGET_PREFIX,
                         RECHECK_PREFIX, TARGET_PREFIX, VIEW_PREFIX, cancel_kb, export_kb,
                         list_kb, main_kb, price_kb, product_kb, target_inline_kb)
-from .sources import wb
+from .sources import detect, ozon, wb
 from .sources.base import BlockedError, ProductInfo, SourceError, format_price
-from .sources.wb import WBSource
 from .states import AddProduct, AddSearch, AddSeller, EditTarget
 
 log = logging.getLogger(__name__)
 router = Router()
 
 WAIT_TEXT = "⏳ Проверяю на Wildberries… Иногда это занимает до минуты."
+WAIT_TEXT_OZON = ("⏳ Проверяю на Ozon… Это около 15 секунд: Ozon пускает только "
+                  "настоящий браузер, поэтому ненадолго откроется окно Chrome.")
 MIN_QUERY, MAX_QUERY = 2, 100
 
 
 def error_text(error: SourceError) -> str:
     if isinstance(error, BlockedError):
-        return "😔 Wildberries сейчас не пускает. Попробуйте через несколько минут."
+        return "😔 Маркетплейс сейчас не пускает. Попробуйте через несколько минут."
     return f"😔 Не получилось: {esc(str(error))}"
 
 
 async def limit_reached(message: Message, db: Database, config: Config) -> bool:
-    """Не больше max_trackings отслеживаний на человека — бережём IP от бана WB."""
+    """Не больше max_trackings отслеживаний на человека — бережём IP от бана маркетплейсов."""
     if await db.count_trackings(message.from_user.id) >= config.max_trackings:
         await message.answer(f"Достигнут лимит: {config.max_trackings} отслеживаний. "
                              "Удалите что-нибудь в «Мои отслеживания».", reply_markup=main_kb)
@@ -57,10 +58,10 @@ async def limit_reached(message: Message, db: Database, config: Config) -> bool:
 async def start(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(
-        "Привет! Я слежу за ценами на Wildberries и сообщаю, когда они меняются.\n\n"
-        f"{BTN_PRODUCT} — следить за одним товаром (можно задать желаемую цену)\n"
-        f"{BTN_SELLER} — следить за всеми товарами продавца\n"
-        f"{BTN_SEARCH} — следить за топом поисковой выдачи\n\n"
+        "Привет! Я слежу за ценами на Wildberries и Ozon и сообщаю, когда они меняются.\n\n"
+        f"{BTN_PRODUCT} — следить за товаром WB или Ozon (можно задать желаемую цену)\n"
+        f"{BTN_SELLER} — следить за всеми товарами продавца (WB)\n"
+        f"{BTN_SEARCH} — следить за топом поисковой выдачи (WB)\n\n"
         "Цены проверяю сам по расписанию, а /check — проверить прямо сейчас.\n\n"
         "Выберите в меню 👇", reply_markup=main_kb)
 
@@ -102,8 +103,11 @@ async def check_now(message: Message, state: FSMContext, checker: Checker,
 async def list_view(db: Database, user_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
     """Текст и кнопки списка «Мои отслеживания»."""
     trackings = await db.list_trackings(user_id)
-    products = [t.target for t in trackings if t.kind == "product"]
-    last = await db.last_prices("wb", products)
+    last = {}
+    for source in {t.source for t in trackings if t.kind == "product"}:
+        articles = [t.target for t in trackings if t.kind == "product" and t.source == source]
+        for article, point in (await db.last_prices(source, articles)).items():
+            last[(source, article)] = point
     return trackings_text(trackings, last), list_kb(trackings)
 
 
@@ -183,7 +187,7 @@ async def own_product(callback: CallbackQuery, db: Database, prefix: str):
 async def card_view(db: Database, config: Config, tracking,
                     notes: list[str] | None = None) -> tuple[str, InlineKeyboardMarkup]:
     """Текст и кнопки карточки. notes — строки сверху: что только что изменилось."""
-    summary = await db.product_summary("wb", tracking.target)
+    summary = await db.product_summary(tracking.source, tracking.target)
     if summary is None:
         text = "По этому товару ещё нет данных. Нажмите «🔄 Обновить»."
     else:
@@ -212,7 +216,7 @@ async def show_card_in(bot, data: dict, user_id: int, db: Database, config: Conf
 @router.callback_query(F.data.startswith(VIEW_PREFIX))
 async def view_product(callback: CallbackQuery, state: FSMContext, db: Database,
                        config: Config) -> None:
-    """Карточка товара — из нашей базы, мгновенно и без запросов к WB.
+    """Карточка товара — из нашей базы, мгновенно и без запросов к маркетплейсу.
     Сюда же ведёт «◀️ Назад» из вопроса о цели."""
     await state.clear()
     tracking = await own_product(callback, db, VIEW_PREFIX)
@@ -224,15 +228,18 @@ async def view_product(callback: CallbackQuery, state: FSMContext, db: Database,
 
 @router.callback_query(F.data.startswith(RECHECK_PREFIX))
 async def recheck_product(callback: CallbackQuery, db: Database, config: Config,
-                          wb_source: WBSource) -> None:
-    """Свежие данные с WB по одному товару (с точными остатками по размерам)."""
+                          sources: dict) -> None:
+    """Свежие данные с маркетплейса по одному товару (у WB — с точными остатками
+    по размерам)."""
     tracking = await own_product(callback, db, RECHECK_PREFIX)
     if tracking is None:
         return
     await callback.answer("Обновляю…")
-    old = (await db.last_prices("wb", [tracking.target])).get(tracking.target)
+    old = (await db.last_prices(tracking.source, [tracking.target])).get(tracking.target)
+    # Ozon запрашивает товар по ссылке — берём её из базы
+    urls = await db.product_urls(tracking.source, [tracking.target])
     try:
-        info = await wb_source.fetch(tracking.target)
+        info = await sources[tracking.source].fetch(urls.get(tracking.target, tracking.target))
     except SourceError as e:
         log.warning("Обновление товара %s: %s", tracking.target, e)
         await edit(callback.message, *await card_view(db, config, tracking, [error_text(e)]))
@@ -250,7 +257,7 @@ async def price_chart(callback: CallbackQuery, db: Database, config: Config) -> 
     tracking = await own_product(callback, db, CHART_PREFIX)
     if tracking is None:
         return
-    history = await db.price_history("wb", tracking.target)
+    history = await db.price_history(tracking.source, tracking.target)
     if not can_draw(history):
         await callback.answer("Пока мало данных: график появится после нескольких проверок",
                               show_alert=True)
@@ -299,7 +306,7 @@ async def remove_target(callback: CallbackQuery, state: FSMContext, db: Database
 @router.message(F.text == BTN_PRODUCT)
 async def ask_product(message: Message, state: FSMContext) -> None:
     await state.set_state(AddProduct.link)
-    await message.answer("Пришлите ссылку на товар Wildberries.\n"
+    await message.answer("Пришлите ссылку на товар Wildberries или Ozon.\n"
                          "Например: https://www.wildberries.ru/catalog/683146715/detail.aspx",
                          reply_markup=cancel_kb)
 
@@ -307,7 +314,8 @@ async def ask_product(message: Message, state: FSMContext) -> None:
 @router.message(F.text == BTN_SELLER)
 async def ask_seller(message: Message, state: FSMContext) -> None:
     await state.set_state(AddSeller.link)
-    await message.answer("Пришлите ссылку на магазин Wildberries.\n"
+    await message.answer("Пришлите ссылку на магазин Wildberries "
+                         "(магазины Ozon пока не поддерживаются).\n"
                          "Например: https://www.wildberries.ru/seller/250079242\n\n"
                          "Где её взять: на странице товара нажмите на название продавца.",
                          reply_markup=cancel_kb)
@@ -316,7 +324,7 @@ async def ask_seller(message: Message, state: FSMContext) -> None:
 @router.message(F.text == BTN_SEARCH)
 async def ask_search(message: Message, state: FSMContext) -> None:
     await state.set_state(AddSearch.query)
-    await message.answer("Что ищем? Напишите запрос, как в поиске Wildberries.\n"
+    await message.answer("Что ищем на Wildberries? Напишите запрос, как в поиске.\n"
                          "Например: стеклянный коврик для мыши", reply_markup=cancel_kb)
 
 
@@ -352,21 +360,25 @@ async def get_target(message: Message, state: FSMContext, db: Database,
 
 @router.message(AddProduct.link, F.text)
 async def get_product_link(message: Message, state: FSMContext, db: Database,
-                           config: Config, wb_source: WBSource) -> None:
+                           config: Config, sources: dict) -> None:
     text = message.text.strip()
-    if not wb.matches(text):
-        hint = ("Это ссылка на магазин — для неё нажмите «🏪 Магазин»."
-                if wb.SELLER_RE.search(text) else
-                "Это не похоже на ссылку на товар Wildberries.")
+    source = detect(text)
+    if source is None:
+        if wb.SELLER_RE.search(text):
+            hint = "Это ссылка на магазин — для неё нажмите «🏪 Магазин»."
+        elif ozon.SELLER_RE.search(text):
+            hint = "Это ссылка на магазин Ozon — их пока можно отслеживать только по товарам."
+        else:
+            hint = "Это не похоже на ссылку на товар Wildberries или Ozon."
         await message.answer(f"{hint}\nПришлите ссылку на товар или нажмите «Отменить».")
         return
     if await limit_reached(message, db, config):
         await state.clear()
         return
 
-    await message.answer(WAIT_TEXT)
+    await message.answer(WAIT_TEXT_OZON if source == "ozon" else WAIT_TEXT)
     try:
-        info = await wb_source.fetch(text)
+        info = await sources[source].fetch(text)
     except SourceError as e:
         log.warning("Товар %s: %s", text, e)
         await message.answer(error_text(e) + "\nПришлите другую ссылку или нажмите «Отменить».")
@@ -374,7 +386,8 @@ async def get_product_link(message: Message, state: FSMContext, db: Database,
 
     # Первая точка истории цен — сразу, чтобы было с чем сравнивать
     await db.save_snapshot([info])
-    await state.update_data(article=info.article, title=info.name, price=info.price)
+    await state.update_data(source=info.source, article=info.article, title=info.name,
+                            price=info.price)
     await state.set_state(AddProduct.price)
     await message.answer(
         f"{product_card(info)}\n\n"
@@ -397,7 +410,7 @@ async def get_product_price(message: Message, state: FSMContext, db: Database) -
 
     data = await state.get_data()
     await state.clear()
-    _, created = await db.add_tracking(message.from_user.id, "product", "wb",
+    _, created = await db.add_tracking(message.from_user.id, "product", data["source"],
                                        data["article"], data["title"], target_price)
     if not created:
         await message.answer("Этот товар уже отслеживается.", reply_markup=main_kb)
@@ -411,11 +424,15 @@ async def get_product_price(message: Message, state: FSMContext, db: Database) -
 
 @router.message(AddSeller.link, F.text)
 async def get_seller_link(message: Message, state: FSMContext, db: Database,
-                          config: Config, wb_source: WBSource) -> None:
+                          config: Config, sources: dict) -> None:
     text = message.text.strip()
     if not wb.SELLER_RE.search(text):
-        hint = ("Это ссылка на товар — для неё нажмите «🛍 Товар»."
-                if wb.matches(text) else "Это не похоже на ссылку на магазин Wildberries.")
+        if detect(text):
+            hint = "Это ссылка на товар — для неё нажмите «🛍 Товар»."
+        elif ozon.SELLER_RE.search(text):
+            hint = "Магазины Ozon пока не поддерживаются — только Wildberries."
+        else:
+            hint = "Это не похоже на ссылку на магазин Wildberries."
         await message.answer(f"{hint}\nПришлите ссылку на магазин или нажмите «Отменить».")
         return
     if await limit_reached(message, db, config):
@@ -424,7 +441,7 @@ async def get_seller_link(message: Message, state: FSMContext, db: Database,
 
     await message.answer(WAIT_TEXT)
     try:
-        products = await wb_source.seller(text, limit=config.seller_limit)
+        products = await sources["wb"].seller(text, limit=config.seller_limit)
     except SourceError as e:
         log.warning("Магазин %s: %s", text, e)
         await message.answer(error_text(e) + "\nПришлите другую ссылку или нажмите «Отменить».")
@@ -454,7 +471,7 @@ async def get_seller_link(message: Message, state: FSMContext, db: Database,
 
 @router.message(AddSearch.query, F.text)
 async def get_search_query(message: Message, state: FSMContext, db: Database,
-                           config: Config, wb_source: WBSource) -> None:
+                           config: Config, sources: dict) -> None:
     query = " ".join(message.text.split())  # лишние пробелы убираем
     if not MIN_QUERY <= len(query) <= MAX_QUERY:
         await message.answer(f"Запрос должен быть от {MIN_QUERY} до {MAX_QUERY} символов.")
@@ -465,7 +482,7 @@ async def get_search_query(message: Message, state: FSMContext, db: Database,
 
     await message.answer(WAIT_TEXT)
     try:
-        products = await wb_source.search(query, limit=config.search_limit)
+        products = await sources["wb"].search(query, limit=config.search_limit)
     except SourceError as e:
         log.warning("Поиск %r: %s", query, e)
         await message.answer(error_text(e) + "\nПопробуйте другой запрос или нажмите «Отменить».")

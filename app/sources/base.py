@@ -1,6 +1,11 @@
 """Общее для всех источников (маркетплейсов): формат результата и ошибки."""
 from dataclasses import dataclass
 
+SOURCE_NAMES = {"wb": "WB", "ozon": "Ozon"}
+# Где известно точное количество на складе. Ozon показывает только «есть / нет»,
+# поэтому у его товаров quantity условное: 1 — в наличии, 0 — нет
+EXACT_STOCK = {"wb"}
+
 
 @dataclass(frozen=True)
 class SizeInfo:
@@ -36,6 +41,7 @@ class ProductInfo:
     brand: str = ""
     rating: float | None = None  # средняя оценка по отзывам, 0–5
     feedbacks: int = 0           # количество отзывов
+    card_price: int | None = None  # цена по карте маркетплейса (Ozon), если отличается
 
     @property
     def in_stock(self) -> bool:
