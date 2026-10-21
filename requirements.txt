@@ -6,3 +6,4 @@ aiosqlite>=0.20
 apscheduler>=3.10,<4
 tzdata>=2024.1
 openpyxl>=3.1
+matplotlib>=3.8

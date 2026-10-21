@@ -87,4 +87,4 @@ def test_helpers():
 def test_stock_note_in_summary():
     sheet = open_book()["Сводка"]
     values = [c.value for row in sheet.iter_rows() for c in row if c.value]
-    assert any("43 и больше" in str(v) for v in values)
+    assert any("ограничивать" in str(v) for v in values)

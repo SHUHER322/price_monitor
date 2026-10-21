@@ -60,8 +60,7 @@ def test_card_with_sizes():
     assert "• M: — (нет)" in card
 
 
-@pytest.mark.parametrize("quantity, text", [(0, "нет"), (1, "1 шт."), (42, "42 шт."),
-                                            (43, "43+ шт.")])
+@pytest.mark.parametrize("quantity, text", [(0, "нет"), (1, "1 шт."), (49, "49 шт.")])
 def test_stock_text(quantity, text):
     assert stock_text(quantity) == text
 
@@ -84,7 +83,7 @@ def test_product_summary_text():
                              checked_at="2026-10-20 13:01:00", min_price=113800,
                              max_price=129000, checks=4)
     text = product_summary_text(tracking(target_price=100000), summary, "20.10.2026 20:01")
-    assert "Сейчас: <b>1 138 ₽</b> (без скидки 2 990 ₽), в наличии: 43+ шт." in text
+    assert "Сейчас: <b>1 138 ₽</b> (без скидки 2 990 ₽), в наличии: 43 шт." in text
     assert "Желаемая цена: 1 000 ₽" in text
     assert "мин 1 138 ₽, макс 1 290 ₽" in text
     assert "Размеры: M — есть" in text

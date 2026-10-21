@@ -20,7 +20,6 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from .db import ItemRow, Tracking
-from .sources.wb import STOCK_CAP
 
 RUB = '# ##0 "₽"'   # формат ячейки: 2 763 ₽
 PERCENT = "0%"
@@ -125,8 +124,9 @@ def _summary_sheet(sheet, tracking: Tracking, rows: list[ItemRow], tz: ZoneInfo,
         if "цена" in label.lower() and label != "Цены на момент проверки":
             cell.number_format = RUB
     note = sheet.cell(row=len(facts) + 3, column=1, value=(
-        "Остаток — со склада, ближайшего к региону доставки. WB показывает не больше "
-        f"{STOCK_CAP} шт., поэтому {STOCK_CAP} значит «{STOCK_CAP} и больше»."))
+        "Остаток — со склада, ближайшего к региону доставки. WB может ограничивать "
+        "показываемое число: одинаковое максимальное значение у многих товаров "
+        "значит «столько и больше»."))
     note.font = Font(italic=True, color="666666")
 
     if tracking.kind != "search" or not rows:

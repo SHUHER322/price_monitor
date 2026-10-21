@@ -13,6 +13,7 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
+from .chart import build_price_chart, can_draw
 from .checker import Checker, change_notes, find_changes
 from .config import Config
 from .db import Database
@@ -20,7 +21,7 @@ from .excel import build_workbook, export_filename, to_local
 from .formatting import (esc, parse_rubles, product_card, product_summary_text,
                          products_preview, trackings_text)
 from .keyboards import (BTN_CANCEL, BTN_LIST, BTN_PRODUCT, BTN_SEARCH, BTN_SELLER, BTN_SKIP,
-                        DELETE_PREFIX, EXPORT_PREFIX, LIST_CALLBACK, NO_TARGET_PREFIX,
+                        CHART_PREFIX, DELETE_PREFIX, EXPORT_PREFIX, LIST_CALLBACK, NO_TARGET_PREFIX,
                         RECHECK_PREFIX, TARGET_PREFIX, VIEW_PREFIX, cancel_kb, export_kb,
                         list_kb, main_kb, price_kb, product_kb, target_inline_kb)
 from .sources import wb
@@ -240,6 +241,25 @@ async def recheck_product(callback: CallbackQuery, db: Database, config: Config,
     await db.save_snapshot([info])
     notes = change_notes(tracking, changes) or ["🔄 Обновлено, заметных изменений нет"]
     await edit(callback.message, *await card_view(db, config, tracking, notes))
+
+
+@router.callback_query(F.data.startswith(CHART_PREFIX))
+async def price_chart(callback: CallbackQuery, db: Database, config: Config) -> None:
+    """График истории цены. Картинку нельзя вставить в текстовое сообщение,
+    поэтому она приходит отдельным сообщением под карточкой."""
+    tracking = await own_product(callback, db, CHART_PREFIX)
+    if tracking is None:
+        return
+    history = await db.price_history("wb", tracking.target)
+    if not can_draw(history):
+        await callback.answer("Пока мало данных: график появится после нескольких проверок",
+                              show_alert=True)
+        return
+    await callback.answer("Рисую график…")
+    png = build_price_chart(tracking.title, history, config.timezone, tracking.target_price)
+    await callback.message.answer_photo(BufferedInputFile(png, filename="price.png"),
+                                        caption=f"📈 {esc(tracking.title[:80])}: "
+                                                f"{len(history)} проверок")
 
 
 @router.callback_query(F.data.startswith(TARGET_PREFIX))

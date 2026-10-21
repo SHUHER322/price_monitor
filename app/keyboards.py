@@ -18,6 +18,7 @@ VIEW_PREFIX = "view:"       # открыть карточку товара
 TARGET_PREFIX = "target:"   # изменить желаемую цену
 RECHECK_PREFIX = "recheck:" # обновить данные товара с WB
 NO_TARGET_PREFIX = "notarget:"  # убрать желаемую цену
+CHART_PREFIX = "chart:"     # график истории цены
 LIST_CALLBACK = "list"      # вернуться к списку отслеживаний
 
 main_kb = ReplyKeyboardMarkup(
@@ -44,8 +45,9 @@ def product_kb(tracking_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎯 Изменить цель", callback_data=f"{TARGET_PREFIX}{tracking_id}"),
          InlineKeyboardButton(text="🔄 Обновить", callback_data=f"{RECHECK_PREFIX}{tracking_id}")],
-        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{DELETE_PREFIX}{tracking_id}"),
-         InlineKeyboardButton(text="◀️ К списку", callback_data=LIST_CALLBACK)],
+        [InlineKeyboardButton(text="📈 График", callback_data=f"{CHART_PREFIX}{tracking_id}"),
+         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{DELETE_PREFIX}{tracking_id}")],
+        [InlineKeyboardButton(text="◀️ К списку", callback_data=LIST_CALLBACK)],
     ])
 
 

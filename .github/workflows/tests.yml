@@ -1,0 +1,27 @@
+# Автоматический запуск тестов на GitHub при каждом push в main и в каждом PR
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      # Скачать код репозитория на виртуальную машину GitHub
+      - uses: actions/checkout@v5
+
+      # Поставить ту же версию Python, что и локально
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      # Браузер для тестов не нужен: ответы WB в тестах — сохранённые файлы
+      - name: Установить зависимости
+        run: pip install -r requirements-dev.txt
+
+      - name: Запустить тесты
+        run: pytest -v

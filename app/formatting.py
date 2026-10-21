@@ -5,7 +5,6 @@ import re
 
 from .db import PricePoint, ProductSummary, Tracking
 from .sources.base import ProductInfo, format_price
-from .sources.wb import STOCK_CAP
 
 KIND_ICONS = {"product": "🛍", "seller": "🏪", "search": "🔍"}
 MAX_RUBLES = 10_000_000  # больше — скорее опечатка
@@ -30,10 +29,8 @@ def parse_rubles(text: str) -> int | None:
 
 
 def stock_text(quantity: int) -> str:
-    """11 → '11 шт.', 43 → '43+ шт.' (WB не показывает больше), 0 → 'нет'."""
-    if not quantity:
-        return "нет"
-    return f"{quantity}+ шт." if quantity >= STOCK_CAP else f"{quantity} шт."
+    """11 → '11 шт.', 0 → 'нет'."""
+    return f"{quantity} шт." if quantity else "нет"
 
 
 def esc(text: str) -> str:
