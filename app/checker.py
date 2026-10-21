@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from .db import Database, PricePoint, Tracking
-from .formatting import esc
+from .formatting import esc, size_labels
 from .sources.base import (SOURCE_NAMES, BlockedError, ProductInfo, SourceError, format_price,
                            size_available)
 
@@ -122,12 +122,16 @@ def change_notes(tracking: Tracking, changes: list[Change]) -> list[str]:
             lines.append("❌ Товар закончился")
         elif c.kind == "back":
             lines.append(f"✅ Снова в наличии: <b>{format_price(p.price)}</b>")
-        elif c.kind == "sizes_back":
-            word = "Появился размер" if len(c.sizes) == 1 else "Появились размеры"
-            lines.append(f"✅ {word}: <b>{esc(', '.join(c.sizes))}</b>")
-        elif c.kind == "sizes_out":
-            word = "Закончился размер" if len(c.sizes) == 1 else "Закончились размеры"
-            lines.append(f"❌ {word}: {esc(', '.join(c.sizes))}")
+        elif c.kind in ("sizes_back", "sizes_out"):
+            grid, labels = size_labels(c.sizes)
+            names = esc(", ".join(labels[n] for n in c.sizes))
+            one = len(c.sizes) == 1
+            if c.kind == "sizes_back":
+                word = "Появился размер" if one else "Появились размеры"
+                lines.append(f"✅ {word}{grid}: <b>{names}</b>")
+            else:
+                word = "Закончился размер" if one else "Закончились размеры"
+                lines.append(f"❌ {word}{grid}: {names}")
     return lines
 
 

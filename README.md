@@ -13,18 +13,35 @@ APScheduler, openpyxl, matplotlib, pytest + GitHub Actions.
 
 <table>
   <tr>
+    <th>Добавление товара с выбором размеров</th>
+    <th>Список, сводка магазина, Excel, размеры</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/add_product.gif" width="380" alt="Добавление товара Ozon с выбором размеров"></td>
+    <td><img src="docs/screenshots/list_and_card.gif" width="380" alt="Список отслеживаний, карточка магазина, выгрузка в Excel и выбор размеров"></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
     <th>Меню</th>
-    <th>Товар с размерами</th>
     <th>Мои отслеживания</th>
     <th>Карточка товара</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/1_menu.png" width="260" alt="Меню бота"></td>
+    <td><img src="docs/screenshots/3_list.png" width="260" alt="Список отслеживаний по разделам"></td>
+    <td><img src="docs/screenshots/3_card.png" width="260" alt="Карточка товара с размерами"></td>
+  </tr>
+  <tr>
+    <th>Выбор размеров</th>
+    <th>Сводка магазина</th>
     <th>Топ поиска</th>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/1_menu.png" width="200" alt="Меню бота"></td>
-    <td><img src="docs/screenshots/2_product.png" width="200" alt="Добавление товара"></td>
-    <td><img src="docs/screenshots/3_list.png" width="200" alt="Список отслеживаний"></td>
-    <td><img src="docs/screenshots/3_card.png" width="200" alt="Карточка товара"></td>
-    <td><img src="docs/screenshots/4_search.png" width="200" alt="Отслеживание поиска"></td>
+    <td><img src="docs/screenshots/2_product.png" width="260" alt="Выбор размеров кнопками"></td>
+    <td><img src="docs/screenshots/9_seller_card.png" width="260" alt="Сводка магазина Ozon"></td>
+    <td><img src="docs/screenshots/4_search.png" width="260" alt="Отслеживание поиска"></td>
   </tr>
 </table>
 

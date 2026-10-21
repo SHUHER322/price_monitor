@@ -2,10 +2,11 @@
 import pytest
 
 from app.db import PricePoint, Tracking
-from app.db import ItemRow
+from app.db import ItemRow, ProductSummary
 from app.formatting import (button_text, chosen_sizes_line, group_summary_text, ordered,
-                            parse_rubles, product_card, short, sizes_prompt, stock_text,
-                            tracking_line, trackings_text)
+                            parse_rubles, product_card, short, size_labels, sizes_list,
+                            sizes_prompt, sizes_text, stock_text, tracking_line,
+                            trackings_text)
 from app.sources.base import ProductInfo, SizeInfo
 
 
@@ -159,7 +160,7 @@ def test_chosen_sizes_line():
     sizes = [{"name": "S", "price": 100, "quantity": None},
              {"name": "M", "price": None, "quantity": 0}]
     assert chosen_sizes_line(("S", "M", "XL"), sizes) == "S — есть, M — нет, XL — нет в списке"
-    assert "Выбрано: любой" in sizes_prompt("Куртка", [])
+    assert "слежу за любым размером" in sizes_prompt("Куртка", [])
     assert "Выбрано: S, M" in sizes_prompt("Куртка", ["S", "M"])
 
 
@@ -170,3 +171,26 @@ def test_ozon_card_with_sizes():
     card = product_card(info)
     assert "Цена: <b>6 752 ₽</b>, по карте Ozon 6 457 ₽" in card   # обычная цена, не из размеров
     assert "Размеры: 36 — есть; 44 — нет" in card
+
+
+def test_ozon_size_labels():
+    names = ["35 RU / EU36", "36 RU / EU37", "44 RU / EU45"]
+    assert size_labels(names) == (" (RU)", {"35 RU / EU36": "35", "36 RU / EU37": "36",
+                                            "44 RU / EU45": "44"})
+    assert size_labels(["M", "42-44"]) == ("", {"M": "M", "42-44": "42-44"})   # WB как есть
+    sizes = [{"name": n, "price": 100, "quantity": -1} for n in names]
+    sizes[2]["price"] = None
+    assert sizes_text(sizes) == "Размеры (RU): 35, 36 — есть; 44 — нет"
+    assert sizes_list(["36 RU / EU37", "43 RU / EU44"]) == "Размеры (RU): 36, 43"
+    assert "Выбрано (RU): 36" in sizes_prompt("Кроссовки", ["36 RU / EU37"])
+
+
+def test_price_not_changed_line():
+    t = Tracking(id=1, user_id=111, kind="product", source="ozon", target="1", title="К",
+                 target_price=None, created_at="x", sizes=("43 RU / EU44",))
+    summary = ProductSummary("К", "u", 675200, None, -1,
+                             [{"name": "43 RU / EU44", "price": 645700, "quantity": -1}],
+                             "x", 675200, 675200, 2)
+    text = product_summary_text(t, summary, "21.10.2026 22:11")
+    assert "цена пока не менялась" in text
+    assert "📏 Слежу за размерами (RU): 43 — есть" in text

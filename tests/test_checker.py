@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from app.checker import (Checker, change_notes, find_changes, product_message,
+from app.checker import (Change, Checker, change_notes, find_changes, product_message,
                          summary_message)
 from app.db import Database, PricePoint, Tracking
 from app.sources.base import BlockedError, ProductInfo, SizeInfo, SourceError
@@ -97,6 +97,8 @@ def test_size_notes():
     t = tracking()
     changes = find_changes(sized_point("S"), sized("S", "M", "L"), 5, sizes=("M", "L"))
     assert change_notes(t, changes) == ["✅ Появились размеры: <b>M, L</b>"]
+    ozon = Change("sizes_out", sized(), sizes=("38 RU / EU39",))
+    assert change_notes(t, [ozon]) == ["❌ Закончился размер (RU): 38"]
 
 
 # --- тексты ---

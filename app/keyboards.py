@@ -3,7 +3,7 @@ from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                            KeyboardButton, ReplyKeyboardMarkup)
 
 from .db import Tracking
-from .formatting import button_text, ordered
+from .formatting import button_text, ordered, size_labels
 
 # Тексты кнопок — константы: по ним же обработчики узнают нажатия
 BTN_PRODUCT = "🛍 Товар"
@@ -72,15 +72,18 @@ def product_kb(tracking_id: int, has_sizes: bool = False) -> InlineKeyboardMarku
 
 def sizes_kb(names: list[str], chosen: list[str] | tuple[str, ...],
              tracking_id: int | None = None) -> InlineKeyboardMarkup:
-    """Кнопки-переключатели размеров: ✅ — отмечен. По 3 в ряд.
+    """Кнопки-переключатели размеров: ✅ — отмечен. Короткие подписи — по 4 в ряд,
+    длинные — по 3.
     tracking_id=None — выбор при добавлении товара (товара в базе ещё нет).
     В callback_data — номер размера в списке: название может не влезть в 64 байта."""
+    _, labels = size_labels(names)
     buttons = []
     for i, name in enumerate(names):
         mark = "✅" if name in chosen else "◻️"
         data = f"{PICK_PREFIX}{i}" if tracking_id is None else f"{SIZE_PREFIX}{tracking_id}:{i}"
-        buttons.append(InlineKeyboardButton(text=f"{mark} {name}", callback_data=data))
-    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+        buttons.append(InlineKeyboardButton(text=f"{mark} {labels[name]}", callback_data=data))
+    per_row = 4 if all(len(label) <= 6 for label in labels.values()) else 3
+    rows = [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]
     if tracking_id is None:
         rows.append([InlineKeyboardButton(text="✔️ Готово", callback_data=PICK_DONE)])
     else:

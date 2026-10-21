@@ -63,7 +63,7 @@ def product_card(info: ProductInfo) -> str:
         stock = "есть" if info.in_stock else "нет в наличии"
         lines.append(f"Цена: <b>{format_price(info.price)}</b>"
                      f"{card_price_text(info.card_price, info.source)}, в наличии: {stock}")
-        lines.append(f"Размеры: {sizes_line(size_dicts(info))}")
+        lines.append(sizes_text(size_dicts(info)))
     elif info.has_sizes:
         for s in info.sizes:
             if s.quantity is not None:
@@ -179,23 +179,58 @@ def size_dicts(info: ProductInfo) -> list[dict]:
     return [{"name": s.name, "price": s.price, "quantity": s.quantity} for s in info.sizes]
 
 
+def size_labels(names) -> tuple[str, dict[str, str]]:
+    """Короткие подписи размеров для показа (в базе остаются полные названия).
+    Ozon пишет '36 RU / EU37' — показываем '36', а сетку '(RU)' — один раз
+    в заголовке. Размеры WB ('M', '42-44') не меняются.
+    Возвращает (' (RU)' или '', {полное название: подпись})."""
+    names = list(names)
+    base = {n: n.split(" / ")[0].strip() for n in names}
+    if names and all(b.endswith(" RU") for b in base.values()):
+        return " (RU)", {n: b.removesuffix(" RU") for n, b in base.items()}
+    return "", base
+
+
+def sizes_list(names) -> str:
+    """'Размеры (RU): 36, 43' — для подтверждений; пусто — 'Размер: любой'."""
+    names = list(names)
+    if not names:
+        return "Размер: любой"
+    grid, labels = size_labels(names)
+    return f"Размеры{grid}: {esc(', '.join(labels[n] for n in names))}"
+
+
 def chosen_sizes_line(chosen: tuple[str, ...] | list[str], sizes: list[dict]) -> str:
     """'36 — есть, 38 — нет' — выбранные размеры и их наличие на последней проверке."""
     known = {s.get("name"): size_available(s) for s in sizes}
+    _, labels = size_labels(chosen)
     parts = []
     for name in chosen:
         status = "есть" if known.get(name) else ("нет" if name in known else "нет в списке")
-        parts.append(f"{esc(name)} — {status}")
+        parts.append(f"{esc(labels[name])} — {status}")
     return ", ".join(parts)
 
 
 def sizes_prompt(name: str, chosen: list[str] | tuple[str, ...]) -> str:
     """Текст над кнопками выбора размеров."""
-    picked = ", ".join(esc(n) for n in chosen) if chosen else "любой"
+    if chosen:
+        grid, labels = size_labels(chosen)
+        picked = f"Выбрано{grid}: " + ", ".join(esc(labels[n]) for n in chosen)
+    else:
+        picked = "Выбрано: ничего — слежу за любым размером"
     return (f"📏 <b>{esc(name[:60])}</b>\n"
             "За какими размерами следить? Нажимайте на размеры, чтобы отметить ✅.\n"
             "Сообщу, когда отмеченный размер появится или закончится.\n\n"
-            f"Выбрано: {picked}")
+            f"{picked}")
+
+
+def sizes_text(sizes: list[dict]) -> str | None:
+    """'Размеры (RU): 35, 36 — есть; 44 — нет'. Без размеров — None."""
+    body = sizes_line(sizes)
+    if body is None:
+        return None
+    grid, _ = size_labels(s["name"] for s in sizes if s.get("name"))
+    return f"Размеры{grid}: {body}"
 
 
 def sizes_line(sizes: list[dict]) -> str | None:
@@ -203,8 +238,9 @@ def sizes_line(sizes: list[dict]) -> str | None:
     named = [s for s in sizes if s.get("name")]
     if not named:
         return None
-    have = [esc(s["name"]) for s in named if size_available(s)]
-    missing = [esc(s["name"]) for s in named if not size_available(s)]
+    _, labels = size_labels(s["name"] for s in named)
+    have = [esc(labels[s["name"]]) for s in named if size_available(s)]
+    missing = [esc(labels[s["name"]]) for s in named if not size_available(s)]
     parts = []
     if have:
         parts.append(f"{', '.join(have)} — есть")
@@ -228,13 +264,18 @@ def product_summary_text(tracking: Tracking, summary: ProductSummary, checked_lo
                  if tracking.target_price else
                  "Желаемая цена: не задана (сообщу о любом заметном снижении)")
     if summary.checks > 1 and summary.min_price is not None:
-        lines.append(f"За время отслеживания: мин {format_price(summary.min_price)}, "
-                     f"макс {format_price(summary.max_price)}")
-    sizes = sizes_line(summary.sizes)
+        if summary.min_price == summary.max_price:
+            lines.append("За время отслеживания цена пока не менялась")
+        else:
+            lines.append(f"За время отслеживания: мин {format_price(summary.min_price)}, "
+                         f"макс {format_price(summary.max_price)}")
+    sizes = sizes_text(summary.sizes)
     if sizes:
-        lines.append(f"Размеры: {sizes}")
+        lines.append(sizes)
     if tracking.sizes:
-        lines.append(f"📏 Слежу за размерами: {chosen_sizes_line(tracking.sizes, summary.sizes)}")
+        grid, _ = size_labels(tracking.sizes)
+        lines.append(f"📏 Слежу за размерами{grid}: "
+                     f"{chosen_sizes_line(tracking.sizes, summary.sizes)}")
     elif sizes:
         lines.append("📏 Слежу за любым размером — выбрать нужные: кнопка «📏 Размеры»")
     lines.append(f"Проверено: {checked_local}")

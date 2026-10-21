@@ -19,7 +19,8 @@ from .config import Config
 from .db import Database
 from .excel import build_workbook, export_filename, to_local
 from .formatting import (esc, group_summary_text, parse_rubles, product_card,
-                         product_summary_text, products_preview, sizes_prompt, trackings_text)
+                         product_summary_text, products_preview, sizes_list, sizes_prompt,
+                         trackings_text)
 from .keyboards import (BTN_CANCEL, BTN_LIST, BTN_PRODUCT, BTN_SEARCH, BTN_SELLER, BTN_SKIP,
                         CHART_PREFIX, DELETE_PREFIX, MARKET_BUTTONS, market_kb, EXPORT_PREFIX, LIST_CALLBACK, NO_TARGET_PREFIX,
                         RECHECK_PREFIX, TARGET_PREFIX, VIEW_PREFIX, cancel_kb, export_kb,
@@ -491,9 +492,8 @@ async def pick_size(callback: CallbackQuery, state: FSMContext) -> None:
 async def sizes_done(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     await callback.answer()
-    picked = ", ".join(esc(n) for n in data["chosen"]) if data["chosen"] else "любой"
     # Кнопки убираем: выбор сделан, дальше — вопрос о цене
-    await edit(callback.message, f"📏 Размеры: <b>{picked}</b>", None)
+    await edit(callback.message, f"📏 {sizes_list(data['chosen'])}", None)
     await ask_price(callback.message, state)
 
 
@@ -529,7 +529,7 @@ async def get_product_price(message: Message, state: FSMContext, db: Database) -
         await message.answer("Этот товар уже отслеживается.", reply_markup=main_kb)
         return
     goal = f"\nЖелаемая цена: {format_price(target_price)}" if target_price else ""
-    sizes = (f"\nРазмеры: {esc(', '.join(chosen))} — сообщу, когда появятся или закончатся"
+    sizes = (f"\n{sizes_list(chosen)} — сообщу, когда появятся или закончатся"
              if chosen else "")
     await message.answer(f"✅ Слежу за товаром «{esc(data['title'][:60])}»{goal}{sizes}",
                          reply_markup=main_kb)
