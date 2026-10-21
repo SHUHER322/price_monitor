@@ -18,12 +18,12 @@ from .checker import Checker, change_notes, find_changes
 from .config import Config
 from .db import Database
 from .excel import build_workbook, export_filename, to_local
-from .formatting import (esc, parse_rubles, product_card, product_summary_text,
-                         products_preview, trackings_text)
+from .formatting import (esc, group_summary_text, parse_rubles, product_card,
+                         product_summary_text, products_preview, trackings_text)
 from .keyboards import (BTN_CANCEL, BTN_LIST, BTN_PRODUCT, BTN_SEARCH, BTN_SELLER, BTN_SKIP,
                         CHART_PREFIX, DELETE_PREFIX, MARKET_BUTTONS, market_kb, EXPORT_PREFIX, LIST_CALLBACK, NO_TARGET_PREFIX,
                         RECHECK_PREFIX, TARGET_PREFIX, VIEW_PREFIX, cancel_kb, export_kb,
-                        list_kb, main_kb, price_kb, product_kb, target_inline_kb)
+                        group_kb, list_kb, main_kb, price_kb, product_kb, target_inline_kb)
 from .sources import detect, ozon, wb
 from .sources.base import BlockedError, ProductInfo, SourceError, format_price
 from .states import AddProduct, AddSearch, AddSeller, EditTarget
@@ -213,17 +213,29 @@ async def show_card_in(bot, data: dict, user_id: int, db: Database, config: Conf
         pass
 
 
+async def group_view(db: Database, config: Config, tracking) -> tuple[str, InlineKeyboardMarkup]:
+    """Текст и кнопки карточки магазина/поиска."""
+    rows = await db.tracking_rows(tracking.id)
+    checked = max((r.checked_at for r in rows if r.checked_at), default=None)
+    text = group_summary_text(tracking, rows, to_local(checked, config.timezone))
+    return text, group_kb(tracking.id)
+
+
 @router.callback_query(F.data.startswith(VIEW_PREFIX))
-async def view_product(callback: CallbackQuery, state: FSMContext, db: Database,
-                       config: Config) -> None:
-    """Карточка товара — из нашей базы, мгновенно и без запросов к маркетплейсу.
+async def view_tracking(callback: CallbackQuery, state: FSMContext, db: Database,
+                        config: Config) -> None:
+    """Карточка из списка — из нашей базы, мгновенно и без запросов к маркетплейсу.
+    Товар — цена, цель, график; магазин и поиск — сводка и Excel.
     Сюда же ведёт «◀️ Назад» из вопроса о цели."""
     await state.clear()
-    tracking = await own_product(callback, db, VIEW_PREFIX)
+    tracking = await db.get_tracking(callback.from_user.id,
+                                     int(callback.data.removeprefix(VIEW_PREFIX)))
     if tracking is None:
+        await callback.answer("Это отслеживание уже удалено", show_alert=True)
         return
     await callback.answer()
-    await edit(callback.message, *await card_view(db, config, tracking))
+    view = card_view if tracking.kind == "product" else group_view
+    await edit(callback.message, *await view(db, config, tracking))
 
 
 @router.callback_query(F.data.startswith(RECHECK_PREFIX))

@@ -2,11 +2,15 @@
 Вынесены отдельно, чтобы их было легко тестировать."""
 import html
 import re
+import statistics
 
-from .db import PricePoint, ProductSummary, Tracking
+from .db import ItemRow, PricePoint, ProductSummary, Tracking
 from .sources.base import EXACT_STOCK, OZON_CARD, SOURCE_NAMES, ProductInfo, format_price
 
 KIND_ICONS = {"product": "🛍", "seller": "🏪", "search": "🔍"}
+# Разделы списка «Мои отслеживания» — в этом порядке
+SECTIONS = [("product", "Товары"), ("seller", "Магазины"), ("search", "Поиск")]
+BUTTON_TITLE = 30   # длиннее Telegram всё равно обрежет кнопку
 MAX_RUBLES = 10_000_000  # больше — скорее опечатка
 
 _NOT_DIGITS = re.compile(r"[^\d.,]")
@@ -78,36 +82,87 @@ def products_preview(products: list[ProductInfo], count: int = 5) -> str:
     return "\n".join(lines)
 
 
-def tracking_line(number: int, tracking: Tracking, last: PricePoint | None = None) -> str:
-    """Строка в списке «Мои отслеживания»."""
-    icon = KIND_ICONS.get(tracking.kind, "•")
-    title = esc(tracking.title[:60])
-    if tracking.kind == "product":
-        market = SOURCE_NAMES.get(tracking.source, tracking.source)
-        parts = [f"{number}. {icon} {market}: {title}"]
-        if last is not None:
-            parts.append(f"сейчас {format_price(last.price)}")
-        if tracking.target_price:
-            parts.append(f"цель {format_price(tracking.target_price)}")
-        return " — ".join(parts)
+def short(text: str, limit: int) -> str:
+    """Обрезать длинное название: 'Зимняя модная тёплая куртка-пуховик' → 'Зимняя модная…'."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1]
+    if text[limit - 1] != " " and " " in cut[limit // 2:]:   # не рвём слово посередине
+        cut = cut[:cut.rindex(" ")]
+    return cut.rstrip(" ,.-(/") + "…"
+
+
+def ordered(trackings: list[Tracking]) -> list[Tracking]:
+    """Сначала товары, потом магазины, потом поиск; внутри — в порядке добавления.
+    В этом же порядке идут и текст списка, и кнопки под ним."""
+    rank = {kind: i for i, (kind, _) in enumerate(SECTIONS)}
+    return sorted(trackings, key=lambda t: rank.get(t.kind, len(rank)))
+
+
+def button_text(tracking: Tracking) -> str:
+    """Кнопка в списке: '🛍 Микшер Fifine mixer SC3… · Ozon'."""
     market = SOURCE_NAMES.get(tracking.source, tracking.source)
-    if tracking.kind == "seller":
-        return f"{number}. {icon} Магазин «{title}» · {market}"
-    return f"{number}. {icon} Поиск «{title}» · {market}"
+    title = short(tracking.title, BUTTON_TITLE)
+    if tracking.kind == "search":
+        title = f"«{title}»"
+    return f"{KIND_ICONS.get(tracking.kind, '•')} {title} · {market}"
+
+
+def tracking_line(tracking: Tracking, last: PricePoint | None = None) -> str:
+    """Строка в списке «Мои отслеживания». У товара под названием — цена и цель."""
+    market = SOURCE_NAMES.get(tracking.source, tracking.source)
+    title = esc(short(tracking.title, 45))
+    if tracking.kind == "search":
+        title = f"«{title}»"
+    line = f"• {market} · {title}"
+    if tracking.kind != "product":
+        return line
+    details = []
+    if last is not None:
+        details.append(format_price(last.price) if last.price is not None else "нет в наличии")
+    if tracking.target_price:
+        details.append(f"цель {format_price(tracking.target_price)}")
+    return line + (f"\n    {' · '.join(details)}" if details else "")
 
 
 def trackings_text(trackings: list[Tracking],
                    last_prices: dict[tuple[str, str], PricePoint]) -> str:
-    """last_prices — по ключу (маркетплейс, артикул)."""
+    """last_prices — по ключу (маркетплейс, артикул). Отслеживания — по разделам."""
     if not trackings:
         return ("Пока ничего не отслеживается.\n"
                 "Выберите в меню, за чем следить: товар, магазин или поиск.")
-    lines = ["<b>Мои отслеживания:</b>"]
-    for i, t in enumerate(trackings, 1):
-        last = last_prices.get((t.source, t.target)) if t.kind == "product" else None
-        lines.append(tracking_line(i, t, last))
-    lines.append("\n🔎 — подробнее о товаре, 📊 — выгрузить магазин или поиск в Excel, "
-                 "🗑 — убрать из отслеживания.")
+    lines = ["<b>Мои отслеживания</b>"]
+    for kind, name in SECTIONS:
+        group = [t for t in trackings if t.kind == kind]
+        if not group:
+            continue
+        lines += ["", f"{KIND_ICONS[kind]} <b>{name}</b>"]
+        for t in group:
+            last = last_prices.get((t.source, t.target)) if kind == "product" else None
+            lines.append(tracking_line(t, last))
+    lines += ["", "Нажмите на кнопку ниже, чтобы открыть подробности."]
+    return "\n".join(lines)
+
+
+def group_summary_text(tracking: Tracking, rows: list[ItemRow], checked_local: str) -> str:
+    """Карточка магазина/поиска (по данным из нашей базы): сколько товаров и цены."""
+    market = SOURCE_NAMES.get(tracking.source, tracking.source)
+    head = "🏪 Магазин" if tracking.kind == "seller" else "🔍 Поиск"
+    lines = [f"{head} «{esc(tracking.title)}» · {market}"]
+    if not rows:
+        lines.append("Данных пока нет — они появятся после первой проверки.")
+        return "\n".join(lines)
+    prices = [r.price for r in rows if r.price is not None]
+    where = "в выдаче" if tracking.kind == "search" else "в магазине"
+    lines.append(f"Товаров {where}: {len(rows)}, в наличии: {len(prices)}")
+    if prices:
+        label = "Цены по карте Ozon" if tracking.source == "ozon" else "Цены"
+        lines.append(f"{label}: от {format_price(min(prices))} до {format_price(max(prices))}, "
+                     f"медиана {format_price(round(statistics.median(prices)))}")
+    if checked_local:
+        lines.append(f"Проверено: {checked_local}")
+    lines += ["", "📊 В Excel — все товары с ценами, скидками, рейтингом и ссылками."]
     return "\n".join(lines)
 
 

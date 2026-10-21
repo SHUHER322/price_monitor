@@ -2,8 +2,9 @@
 import pytest
 
 from app.db import PricePoint, Tracking
-from app.formatting import (parse_rubles, product_card, stock_text, tracking_line,
-                            trackings_text)
+from app.db import ItemRow
+from app.formatting import (button_text, group_summary_text, ordered, parse_rubles,
+                            product_card, short, stock_text, tracking_line, trackings_text)
 from app.sources.base import ProductInfo, SizeInfo
 
 
@@ -31,18 +32,49 @@ def tracking(kind="product", title="Коврик", target_price=None) -> Trackin
 
 def test_product_line_with_price_and_goal():
     last = PricePoint("2026-10-20 10:00:00", 276300, 650300, 11)
-    line = tracking_line(1, tracking(target_price=250000), last)
-    assert line == "1. 🛍 WB: Коврик — сейчас 2 763 ₽ — цель 2 500 ₽"
+    line = tracking_line(tracking(target_price=250000), last)
+    assert line == "• WB · Коврик\n    2 763 ₽ · цель 2 500 ₽"
 
 
 def test_seller_and_search_lines():
-    assert tracking_line(2, tracking("seller", "K A.RU")) == "2. 🏪 Магазин «K A.RU» · WB"
-    assert tracking_line(3, tracking("search", "коврик")) == "3. 🔍 Поиск «коврик» · WB"
+    assert tracking_line(tracking("seller", "K A.RU")) == "• WB · K A.RU"
+    assert tracking_line(tracking("search", "коврик")) == "• WB · «коврик»"
+
+
+def test_list_grouped_by_kind():
+    items = [tracking("search", "коврик"), tracking("product", "Куртка"),
+             tracking("seller", "Ридберг"), tracking("product", "Микшер")]
+    assert [t.title for t in ordered(items)] == ["Куртка", "Микшер", "Ридберг", "коврик"]
+    text = trackings_text(items, {})
+    assert text.index("Товары") < text.index("Магазины") < text.index("Поиск")
+    assert text.index("Куртка") < text.index("Микшер")      # внутри — порядок добавления
+
+
+def test_long_titles_shortened():
+    title = "Зимняя модная теплая куртка-пуховик C P COMPANY x PALACE"
+    assert short(title, 20) == "Зимняя модная…"     # слово не режем
+    assert len(short(title, 20)) <= 20
+    assert button_text(tracking(title=title)).startswith("🛍 Зимняя модная")
+    assert button_text(tracking("search", "коврик")) == "🔍 «коврик» · WB"
+
+
+def test_group_summary():
+    t = Tracking(id=2, user_id=111, kind="seller", source="ozon", target="ridberg",
+                 title="Ридберг", target_price=None, created_at="x")
+    rows = [ItemRow(1, "1", "А", "", "Ридберг", "u", 8900, None, 5, None, 0, "x"),
+            ItemRow(2, "2", "Б", "", "Ридберг", "u", 93900, None, 5, None, 0, "x"),
+            ItemRow(3, "3", "В", "", "Ридберг", "u", 601400, None, 5, None, 0, "x"),
+            ItemRow(4, "4", "Г", "", "Ридберг", "u", None, None, 0, None, 0, "x")]
+    text = group_summary_text(t, rows, "21.10.2026 21:28")
+    assert "Магазин «Ридберг» · Ozon" in text
+    assert "Товаров в магазине: 4, в наличии: 3" in text
+    assert "Цены по карте Ozon: от 89 ₽ до 6 014 ₽, медиана 939 ₽" in text
+    assert "Данных пока нет" in group_summary_text(t, [], "")
 
 
 def test_html_escaped():
     # Название с < > не должно сломать разметку сообщения
-    line = tracking_line(1, tracking(title="<b>Коврик</b>"))
+    line = tracking_line(tracking(title="<b>Коврик</b>"))
     assert "<b>" not in line
     assert "&lt;b&gt;" in line
 

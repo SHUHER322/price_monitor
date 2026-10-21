@@ -3,6 +3,7 @@ from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                            KeyboardButton, ReplyKeyboardMarkup)
 
 from .db import Tracking
+from .formatting import button_text, ordered
 
 # Тексты кнопок — константы: по ним же обработчики узнают нажатия
 BTN_PRODUCT = "🛍 Товар"
@@ -17,7 +18,7 @@ MARKET_BUTTONS = {BTN_MARKET_WB: "wb", BTN_MARKET_OZON: "ozon"}
 
 DELETE_PREFIX = "del:"
 EXPORT_PREFIX = "xls:"
-VIEW_PREFIX = "view:"       # открыть карточку товара
+VIEW_PREFIX = "view:"       # открыть карточку (товара, магазина или поиска)
 TARGET_PREFIX = "target:"   # изменить желаемую цену
 RECHECK_PREFIX = "recheck:" # обновить данные товара с WB
 NO_TARGET_PREFIX = "notarget:"  # убрать желаемую цену
@@ -75,23 +76,22 @@ def export_kb(tracking_id: int) -> InlineKeyboardMarkup:
         text="📊 Выгрузить в Excel", callback_data=f"{EXPORT_PREFIX}{tracking_id}")]])
 
 
-def _rows(buttons: list[InlineKeyboardButton], per_row: int = 4) -> list[list]:
-    return [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]
+def group_kb(tracking_id: int) -> InlineKeyboardMarkup:
+    """Кнопки под карточкой магазина/поиска."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Excel", callback_data=f"{EXPORT_PREFIX}{tracking_id}"),
+         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{DELETE_PREFIX}{tracking_id}")],
+        [InlineKeyboardButton(text="◀️ К списку", callback_data=LIST_CALLBACK)],
+    ])
 
 
 def list_kb(trackings: list[Tracking]) -> InlineKeyboardMarkup | None:
-    """Кнопки под списком: «🔎 1» — карточка товара №1, «📊 2» — выгрузить
-    магазин/поиск №2 в Excel, «🗑 1» — удалить №1. По 4 в ряд.
-    В callback_data — id отслеживания в базе, а не номер в списке:
-    номер меняется после удаления, а id — нет."""
+    """Под списком — по кнопке на отслеживание, в том же порядке, что и текст.
+    Нажатие открывает карточку: у товара — цена, цель, график; у магазина и
+    поиска — сводка и Excel. Удаление — внутри карточки.
+    В callback_data — id отслеживания в базе: он не меняется после удаления других."""
     if not trackings:
         return None
-    # Для товара — карточка, для магазина и поиска — Excel; в порядке списка
-    open_buttons = [
-        InlineKeyboardButton(text=f"🔎 {i}", callback_data=f"{VIEW_PREFIX}{t.id}")
-        if t.kind == "product" else
-        InlineKeyboardButton(text=f"📊 {i}", callback_data=f"{EXPORT_PREFIX}{t.id}")
-        for i, t in enumerate(trackings, 1)]
-    delete = [InlineKeyboardButton(text=f"🗑 {i}", callback_data=f"{DELETE_PREFIX}{t.id}")
-              for i, t in enumerate(trackings, 1)]
-    return InlineKeyboardMarkup(inline_keyboard=_rows(open_buttons) + _rows(delete))
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=button_text(t), callback_data=f"{VIEW_PREFIX}{t.id}")]
+        for t in ordered(trackings)])
