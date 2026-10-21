@@ -4,7 +4,7 @@ import html
 import re
 
 from .db import PricePoint, ProductSummary, Tracking
-from .sources.base import EXACT_STOCK, SOURCE_NAMES, ProductInfo, format_price
+from .sources.base import EXACT_STOCK, OZON_CARD, SOURCE_NAMES, ProductInfo, format_price
 
 KIND_ICONS = {"product": "🛍", "seller": "🏪", "search": "🔍"}
 MAX_RUBLES = 10_000_000  # больше — скорее опечатка
@@ -29,10 +29,10 @@ def parse_rubles(text: str) -> int | None:
 
 
 def stock_text(quantity: int, source: str = "wb") -> str:
-    """11 → '11 шт.', 0 → 'нет'. У Ozon количества нет — только 'есть'."""
+    """11 → '11 шт.', 0 → 'нет'. Если количество неизвестно (страница товара Ozon) — 'есть'."""
     if not quantity:
         return "нет"
-    return f"{quantity} шт." if source in EXACT_STOCK else "есть"
+    return f"{quantity} шт." if source in EXACT_STOCK and quantity > 0 else "есть"
 
 
 def card_price_text(card_price: int | None, source: str) -> str:
@@ -68,8 +68,11 @@ def product_card(info: ProductInfo) -> str:
 
 def products_preview(products: list[ProductInfo], count: int = 5) -> str:
     """Первые товары списка — показать, что нашлось."""
-    lines = [f"{i}. {format_price(p.price)} — {esc(p.name[:50])}"
-             for i, p in enumerate(products[:count], 1)]
+    lines = []
+    if products and products[0].source == OZON_CARD:
+        lines.append("Цены — по карте Ozon, как их показывает каталог.")
+    lines += [f"{i}. {format_price(p.price)} — {esc(p.name[:50])}"
+              for i, p in enumerate(products[:count], 1)]
     if len(products) > count:
         lines.append(f"… и ещё {len(products) - count}")
     return "\n".join(lines)
@@ -87,9 +90,10 @@ def tracking_line(number: int, tracking: Tracking, last: PricePoint | None = Non
         if tracking.target_price:
             parts.append(f"цель {format_price(tracking.target_price)}")
         return " — ".join(parts)
+    market = SOURCE_NAMES.get(tracking.source, tracking.source)
     if tracking.kind == "seller":
-        return f"{number}. {icon} Магазин «{title}»"
-    return f"{number}. {icon} Поиск «{title}»"
+        return f"{number}. {icon} Магазин «{title}» · {market}"
+    return f"{number}. {icon} Поиск «{title}» · {market}"
 
 
 def trackings_text(trackings: list[Tracking],

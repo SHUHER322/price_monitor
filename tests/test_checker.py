@@ -74,7 +74,7 @@ def test_summary_cut_to_ten_lines():
     changes = [c for i in range(15)
                for c in find_changes(point(300000), product(str(i), 200000), 5)]
     text = summary_message(tracking("search", "коврик", "коврик"), changes)
-    assert text.startswith("🔍 Поиск «коврик»: изменения")
+    assert text.startswith("🔍 Поиск «коврик» · WB: изменения")
     assert text.count("📉") == 10
     assert "… и ещё 5" in text
 
@@ -109,7 +109,14 @@ class FakeOzon:
     def __init__(self):
         self.products: dict[str, ProductInfo] = {}
         self.urls: list[str] = []
+        self.searches: dict[str, list[ProductInfo]] = {}
         self.error: Exception | None = None
+
+    async def search(self, query, limit):
+        return self.searches[query][:limit]
+
+    async def seller(self, seller_id, limit):
+        return []
 
     async def fetch_many(self, urls):
         self.urls += urls
@@ -239,3 +246,29 @@ def test_same_article_on_two_marketplaces_not_mixed(setup):
     checker.sources["ozon"].products["777"] = ozon_product("777", 300000)   # на Ozon упала
     assert run(checker.run()) == 1
     assert sent[0][1].startswith("Ozon:")
+
+
+def ozon_tile(article="5", price=300000) -> ProductInfo:
+    """Товар из плитки каталога Ozon: цена по карте, источник ozon_card."""
+    return ProductInfo(source="ozon_card", article=article, name=f"Коврик {article}",
+                       url=f"https://www.ozon.ru/product/{article}/", price=price,
+                       old_price=None, quantity=50)
+
+
+def test_ozon_search_prices_kept_apart_from_product(setup):
+    db, wb, checker, sent = setup
+    ozon = checker.sources["ozon"]
+    # Тот же товар 777: и как отдельный товар (обычная цена), и в поиске (цена по карте)
+    run(db.add_tracking(111, "product", "ozon", "777", "Микшер"))
+    tracking_id, _ = run(db.add_tracking(111, "search", "ozon", "микшер", "микшер"))
+    run(db.save_snapshot([ozon_product("777", 342700), ozon_tile("777", 302300)],
+                         "2026-10-20 10:00:00"))
+    run(db.update_tracking_items(tracking_id, "ozon_card", ["777"], confirm_twice=True))
+    # Цены не изменились — уведомлений быть не должно, хотя по карте дешевле обычной
+    ozon.products["777"] = ozon_product("777", 342700)
+    ozon.searches["микшер"] = [ozon_tile("777", 302300)]
+    assert run(checker.run()) == 0
+    # Цена по карте упала — уведомление по поиску Ozon
+    ozon.searches["микшер"] = [ozon_tile("777", 250000)]
+    assert run(checker.run()) == 1
+    assert sent[0][1].startswith("🔍 Поиск «микшер» · Ozon")

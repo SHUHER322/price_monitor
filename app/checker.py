@@ -47,7 +47,7 @@ def find_changes(old: PricePoint | None, new: ProductInfo, drop_percent: float,
     if old is None:            # товара раньше не видели — сравнивать не с чем
         return []
     changes = []
-    was_in_stock = old.price is not None and old.quantity > 0
+    was_in_stock = old.price is not None and old.quantity != 0
     if was_in_stock and not new.in_stock:
         return [Change("out", new, old.price)]
     if not was_in_stock and new.in_stock and new.price is not None:
@@ -109,8 +109,9 @@ def product_message(tracking: Tracking, changes: list[Change]) -> str:
 
 def summary_message(tracking: Tracking, changes: list[Change]) -> str:
     """Уведомление по магазину/поиску: все изменения одним сообщением."""
-    head = (f"🏪 Магазин «{esc(tracking.title)}»" if tracking.kind == "seller"
-            else f"🔍 Поиск «{esc(tracking.title)}»")
+    market = SOURCE_NAMES.get(tracking.source, tracking.source)
+    head = (f"🏪 Магазин «{esc(tracking.title)}» · {market}" if tracking.kind == "seller"
+            else f"🔍 Поиск «{esc(tracking.title)}» · {market}")
     order = {"new": 0, "drop": 1, "back": 2, "out": 3}   # новинки и снижения — выше
     changes = sorted(changes, key=lambda c: order.get(c.kind, 9))
     lines = [f"{head}: изменения", *map(change_line, changes[:MAX_LINES])]
@@ -209,25 +210,25 @@ class Checker:
                 else:
                     log.info("Товар %s %s не найден (удалён?)", source, article)
 
-        # Магазины и поиск пока есть только у WB
-        wb = self.sources.get("wb")
+        # Магазины и поиск — у WB и Ozon (у Ozon лимит магазина меньше, см. ozon.py)
         for kind in ("seller", "search"):
-            for target in sorted({t.target for t in trackings
-                                  if t.kind == kind and t.source == "wb"}):
-                if "wb" in blocked or wb is None:
-                    break
+            for source, target in sorted({(t.source, t.target) for t in trackings
+                                          if t.kind == kind}):
+                src = self.sources.get(source)
+                if src is None or source in blocked:
+                    continue
                 await self._sleep()
                 try:
                     if kind == "seller":
-                        items = await wb.seller(target, limit=self.seller_limit)
+                        items = await src.seller(target, limit=self.seller_limit)
                     else:
-                        items = await wb.search(target, limit=self.search_limit)
-                    result[(kind, "wb", target)] = items
+                        items = await src.search(target, limit=self.search_limit)
+                    result[(kind, source, target)] = items
                 except BlockedError as e:
-                    log.warning("wb не пускает: %s", e)
-                    blocked.add("wb")
+                    log.warning("%s не пускает: %s", source, e)
+                    blocked.add(source)
                 except SourceError as e:
-                    log.warning("%s %r: %s", kind, target, e)
+                    log.warning("%s %s %r: %s", source, kind, target, e)
         return result
 
     async def _message(self, tracking: Tracking, items: list[ProductInfo],
@@ -238,8 +239,10 @@ class Checker:
             return product_message(tracking, changes) if changes else None
 
         # Для поиска новым считаем только закрепившийся в топе товар (см. db.py)
+        # Источник товаров — у самих товаров: у Ozon в списках это OZON_CARD
+        items_source = items[0].source if items else tracking.source
         new_articles, first = await self.db.update_tracking_items(
-            tracking.id, "wb", [p.article for p in items],
+            tracking.id, items_source, [p.article for p in items],
             confirm_twice=tracking.kind == "search")
         changes = []
         for p in items:

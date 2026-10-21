@@ -11,6 +11,9 @@ BTN_SEARCH = "🔍 Поиск"
 BTN_LIST = "📋 Мои отслеживания"
 BTN_CANCEL = "❌ Отменить"
 BTN_SKIP = "⏭ Пропустить"
+BTN_MARKET_WB = "🟣 Wildberries"
+BTN_MARKET_OZON = "🔵 Ozon"
+MARKET_BUTTONS = {BTN_MARKET_WB: "wb", BTN_MARKET_OZON: "ozon"}
 
 DELETE_PREFIX = "del:"
 EXPORT_PREFIX = "xls:"
@@ -32,6 +35,12 @@ main_kb = ReplyKeyboardMarkup(
 
 cancel_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text=BTN_CANCEL)]],
+    resize_keyboard=True,
+)
+
+market_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=BTN_MARKET_WB), KeyboardButton(text=BTN_MARKET_OZON)],
+              [KeyboardButton(text=BTN_CANCEL)]],
     resize_keyboard=True,
 )
 

@@ -12,6 +12,7 @@ class AddSeller(StatesGroup):
 
 
 class AddSearch(StatesGroup):
+    market = State()  # ждём выбор маркетплейса: Wildberries или Ozon
     query = State()   # ждём поисковый запрос
 
 

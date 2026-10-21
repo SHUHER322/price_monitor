@@ -44,6 +44,7 @@ def test_items_sheet():
     assert sheet["H3"].value == 0.58              # скидка 58%
     assert sheet["L2"].hyperlink.target.endswith("334082543/detail.aspx")
     assert sheet["F5"].value is None              # нет в наличии — пустая цена
+    assert sheet["H5"].value is None              # …и скидка пустая, без «—»
     assert sheet.auto_filter.ref == "A1:L5"
     assert sheet.freeze_panes == "A2"
 
@@ -81,7 +82,7 @@ def test_helpers():
     assert discount(item(1, "1", "x", 276300, old_price=None)) is None
     assert safe_filename('коврик: "лучший" / 2026') == "коврик_лучший_2026"
     assert to_local(None, TZ) == ""
-    assert export_filename(tracking(), NOW) == "поиск_стеклянный_коврик_2026-10-20.xlsx"
+    assert export_filename(tracking(), NOW) == "поиск_wb_стеклянный_коврик_2026-10-20.xlsx"
 
 
 def test_all_prices_in_summary_are_rubles():
@@ -96,3 +97,48 @@ def test_stock_note_in_summary():
     sheet = open_book()["Сводка"]
     values = [c.value for row in sheet.iter_rows() for c in row if c.value]
     assert any("ограничивать" in str(v) for v in values)
+
+
+def ozon_book(kind):
+    t = Tracking(id=2, user_id=111, kind=kind, source="ozon", target="ridberg",
+                 title="Ридберг", target_price=None, created_at="x")
+    rows = [item(1, "1291636512", "Ридберг", 366800),
+            ItemRow(2, "1291633069", "Микшер", "", "Ридберг", "https://ozon/1", 302300, None,
+                    -1, None, 0, "2026-10-20 12:00:00")]
+    return load_workbook(io.BytesIO(build_workbook(t, rows, TZ, NOW)))
+
+
+def headers(sheet):
+    return [c.value for c in sheet[1]]
+
+
+def test_empty_values_are_dashes():
+    sheet = open_book([item(1, "1", "x", 276300, old_price=None)])["Товары"]
+    row = dict(zip(headers(sheet), [c.value for c in sheet[2]]))
+    assert row["Цена до скидки"] == "—" and row["Скидка"] == "—"   # скидки нет
+
+
+def test_ozon_seller_columns():
+    book = ozon_book("seller")
+    items = book["Товары"]
+    titles = headers(items)
+    assert "Бренд" not in titles                  # в каталоге Ozon бренда нет
+    assert "Продавец" in titles
+    assert "Цена по карте Ozon" in titles
+    row = dict(zip(titles, [c.value for c in items[3]]))
+    assert row["Остаток, шт."] == "в наличии"     # количество неизвестно
+    assert row["Рейтинг"] == "—"                  # нет отзывов
+    assert row["Скидка"] == "—"
+    assert items.auto_filter.ref == "A1:K3"
+
+    summary = book["Сводка"]
+    assert summary["A1"].value == "Магазин (Ozon): Ридберг"
+    values = [c.value for row in summary.iter_rows() for c in row if c.value]
+    assert any("по карте Ozon" in str(v) for v in values)
+
+
+def test_ozon_search_has_no_seller():
+    book = ozon_book("search")
+    assert "Продавец" not in headers(book["Товары"])
+    values = [c.value for row in book["Сводка"].iter_rows() for c in row if c.value]
+    assert "Продавцы в выдаче" not in values      # продавцов в выдаче Ozon нет

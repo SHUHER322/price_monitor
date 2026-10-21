@@ -36,8 +36,8 @@ def test_product_line_with_price_and_goal():
 
 
 def test_seller_and_search_lines():
-    assert tracking_line(2, tracking("seller", "K A.RU")) == "2. 🏪 Магазин «K A.RU»"
-    assert tracking_line(3, tracking("search", "коврик")) == "3. 🔍 Поиск «коврик»"
+    assert tracking_line(2, tracking("seller", "K A.RU")) == "2. 🏪 Магазин «K A.RU» · WB"
+    assert tracking_line(3, tracking("search", "коврик")) == "3. 🔍 Поиск «коврик» · WB"
 
 
 def test_html_escaped():
@@ -99,8 +99,11 @@ def test_product_summary_text_out_of_stock_no_goal():
 
 
 def test_ozon_stock_and_card_price():
-    assert stock_text(1, "ozon") == "есть"        # у Ozon нет количества
+    assert stock_text(-1, "ozon") == "есть"       # страница товара Ozon: только есть/нет
+    assert stock_text(1, "ozon") == "есть"        # так хранились старые записи
     assert stock_text(0, "ozon") == "нет"
+    assert stock_text(225, "ozon_card") == "225 шт."   # плитка: «225 ед осталось»
+    assert stock_text(-1, "ozon_card") == "есть"
     info = ProductInfo(source="ozon", article="1", url="u", name="Микшер", price=342700,
                        old_price=1099000, quantity=1, seller="Ридберг", card_price=309800)
     card = product_card(info)

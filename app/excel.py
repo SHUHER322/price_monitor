@@ -28,12 +28,18 @@ HEADER_FILL = PatternFill("solid", fgColor="2F3B52")
 LINK_FONT = Font(color="0563C1", underline="single")
 TITLE_FONT = Font(bold=True, size=14)
 
-# Столбцы листа «Товары»: (заголовок, ширина)
-COLUMNS = [
-    ("Место", 7), ("Артикул", 12), ("Название", 50), ("Бренд", 18), ("Продавец", 22),
-    ("Цена", 11), ("Цена до скидки", 14), ("Скидка", 11), ("Рейтинг", 11),
-    ("Отзывы", 10), ("Остаток в регионе, шт.", 14), ("Ссылка", 12),
-]
+NO_VALUE = "—"       # «нет скидки», «нет отзывов»: пустая ячейка выглядит как ошибка
+IN_STOCK = "в наличии"   # Ozon: товар есть, но сколько штук — не показано
+
+# Столбцы листа «Товары»: ключ → (заголовок, ширина). Порядок — как в файле
+COLUMNS = {
+    "position": ("Место", 7), "article": ("Артикул", 12), "name": ("Название", 50),
+    "brand": ("Бренд", 18), "seller": ("Продавец", 22), "price": ("Цена", 11),
+    "old_price": ("Цена до скидки", 14), "discount": ("Скидка", 11),
+    "rating": ("Рейтинг", 11), "feedbacks": ("Отзывы", 10),
+    "quantity": ("Остаток в регионе, шт.", 14), "link": ("Ссылка", 12),
+}
+OZON_TITLES = {"price": "Цена по карте Ozon", "quantity": "Остаток, шт."}
 
 
 def to_local(utc_text: str | None, tz: ZoneInfo) -> str:
@@ -55,6 +61,38 @@ def discount(row: ItemRow) -> float | None:
     return round(1 - row.price / row.old_price, 2)
 
 
+def columns_for(tracking: Tracking) -> dict[str, tuple[str, int]]:
+    """Столбцы под маркетплейс. В каталоге Ozon нет бренда, а в выдаче поиска
+    Ozon — ещё и продавца: такие столбцы были бы всегда пустыми, убираем их."""
+    if tracking.source != "ozon":
+        return dict(COLUMNS)
+    skip = {"brand"} | ({"seller"} if tracking.kind == "search" else set())
+    return {key: (OZON_TITLES.get(key, title), width)
+            for key, (title, width) in COLUMNS.items() if key not in skip}
+
+
+def cell_values(item: ItemRow) -> dict:
+    """Значения строки по ключам столбцов."""
+    in_stock = item.price is not None
+    if item.quantity is not None and item.quantity < 0:   # см. UNKNOWN_STOCK
+        quantity = IN_STOCK
+    else:
+        quantity = item.quantity
+    return {
+        "position": item.position,
+        "article": int(item.article) if item.article.isdigit() else item.article,
+        "name": item.name, "brand": item.brand, "seller": item.seller,
+        "price": rubles(item.price),
+        # Нет зачёркнутой цены — нет скидки. У товара не в наличии оставляем пусто
+        "old_price": rubles(item.old_price) if item.old_price else (NO_VALUE if in_stock else None),
+        "discount": discount(item) if discount(item) is not None else (NO_VALUE if in_stock else None),
+        "rating": item.rating if item.rating is not None else (NO_VALUE if not item.feedbacks else None),
+        "feedbacks": item.feedbacks,
+        "quantity": quantity,
+        "link": "открыть",
+    }
+
+
 def safe_filename(text: str) -> str:
     """Убрать символы, которые нельзя в имени файла Windows."""
     cleaned = re.sub(r'[\\/:*?"<>|]+', "", text).strip()
@@ -69,35 +107,41 @@ def _header(sheet, row: int, titles: list[str]) -> None:
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
 
-def _items_sheet(sheet, rows: list[ItemRow]) -> None:
+FORMATS = {"price": RUB, "old_price": RUB, "discount": PERCENT}
+CENTERED = {"old_price", "discount", "rating", "quantity"}   # там бывает «—» / «в наличии»
+
+
+def _items_sheet(sheet, tracking: Tracking, rows: list[ItemRow]) -> None:
     sheet.title = "Товары"
-    _header(sheet, 1, [title for title, _ in COLUMNS])
-    for col, (_, width) in enumerate(COLUMNS, 1):
+    columns = columns_for(tracking)
+    keys = list(columns)
+    _header(sheet, 1, [title for title, _ in columns.values()])
+    for col, (_, width) in enumerate(columns.values(), 1):
         sheet.column_dimensions[get_column_letter(col)].width = width
 
     for r, item in enumerate(rows, 2):
-        values = [item.position, int(item.article) if item.article.isdigit() else item.article, item.name, item.brand, item.seller,
-                  rubles(item.price), rubles(item.old_price), discount(item),
-                  item.rating, item.feedbacks, item.quantity, "открыть"]
-        for col, value in enumerate(values, 1):
-            sheet.cell(row=r, column=col, value=value)
-        sheet.cell(row=r, column=6).number_format = RUB
-        sheet.cell(row=r, column=7).number_format = RUB
-        sheet.cell(row=r, column=8).number_format = PERCENT
-        link = sheet.cell(row=r, column=12)
-        link.hyperlink = item.url
-        link.font = LINK_FONT
+        values = cell_values(item)
+        for col, key in enumerate(keys, 1):
+            cell = sheet.cell(row=r, column=col, value=values[key])
+            if key in FORMATS:
+                cell.number_format = FORMATS[key]
+            if isinstance(values[key], str) and key in CENTERED:
+                cell.alignment = Alignment(horizontal="center")
+            if key == "link":
+                cell.hyperlink = item.url
+                cell.font = LINK_FONT
 
     sheet.freeze_panes = "A2"   # заголовок не уезжает при прокрутке
     if rows:
         # Фильтры в заголовке: сортировать по цене, выбрать продавца и т.д.
-        sheet.auto_filter.ref = f"A1:{get_column_letter(len(COLUMNS))}{len(rows) + 1}"
+        sheet.auto_filter.ref = f"A1:{get_column_letter(len(keys))}{len(rows) + 1}"
 
 
 def _summary_sheet(sheet, tracking: Tracking, rows: list[ItemRow], tz: ZoneInfo,
                    exported_at: str) -> None:
     kind = {"seller": "Магазин", "search": "Поиск"}.get(tracking.kind, tracking.kind)
-    sheet["A1"] = f"{kind}: {tracking.title}"
+    market = {"wb": "Wildberries", "ozon": "Ozon"}.get(tracking.source, tracking.source)
+    sheet["A1"] = f"{kind} ({market}): {tracking.title}"
     sheet["A1"].font = TITLE_FONT
     sheet.column_dimensions["A"].width = 32
     sheet.column_dimensions["B"].width = 16
@@ -125,13 +169,18 @@ def _summary_sheet(sheet, tracking: Tracking, rows: list[ItemRow], tz: ZoneInfo,
         cell = sheet.cell(row=i, column=2, value=value)
         if money:
             cell.number_format = RUB
-    note = sheet.cell(row=len(facts) + 3, column=1, value=(
-        "Остаток — со склада, ближайшего к региону доставки. WB может ограничивать "
-        "показываемое число: одинаковое максимальное значение у многих товаров "
-        "значит «столько и больше»."))
+    note_text = ("Цены — по карте Ozon: так их показывает каталог Ozon (поиск и магазин). "
+                 "Остаток — по надписи «N ед осталось»; «в наличии» — Ozon не показал, "
+                 "сколько осталось. «—» в скидке и рейтинге — скидки нет, отзывов нет."
+                 if tracking.source == "ozon" else
+                 "Остаток — со склада, ближайшего к региону доставки. WB может ограничивать "
+                 "показываемое число: одинаковое максимальное значение у многих товаров "
+                 "значит «столько и больше».")
+    note = sheet.cell(row=len(facts) + 3, column=1, value=note_text)
     note.font = Font(italic=True, color="666666")
 
-    if tracking.kind != "search" or not rows:
+    # В выдаче поиска Ozon продавца нет — таблица была бы из одних «—»
+    if tracking.kind != "search" or not rows or tracking.source == "ozon":
         return
     # Для поиска: кто из продавцов занимает выдачу
     start = len(facts) + 6
@@ -158,7 +207,7 @@ def build_workbook(tracking: Tracking, rows: list[ItemRow], tz: ZoneInfo,
     """Собрать файл Excel и вернуть его содержимое (байты)."""
     now = now or datetime.now(tz)
     workbook = Workbook()
-    _items_sheet(workbook.active, rows)
+    _items_sheet(workbook.active, tracking, rows)
     _summary_sheet(workbook.create_sheet("Сводка", 0), tracking, rows, tz,
                    now.strftime("%d.%m.%Y %H:%M"))
     workbook.active = 0   # открываться файл будет на сводке
@@ -169,4 +218,4 @@ def build_workbook(tracking: Tracking, rows: list[ItemRow], tz: ZoneInfo,
 
 def export_filename(tracking: Tracking, now: datetime) -> str:
     prefix = {"seller": "магазин", "search": "поиск"}.get(tracking.kind, tracking.kind)
-    return f"{prefix}_{safe_filename(tracking.title)}_{now:%Y-%m-%d}.xlsx"
+    return f"{prefix}_{tracking.source}_{safe_filename(tracking.title)}_{now:%Y-%m-%d}.xlsx"

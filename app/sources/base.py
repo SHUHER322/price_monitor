@@ -1,10 +1,16 @@
 """Общее для всех источников (маркетплейсов): формат результата и ошибки."""
 from dataclasses import dataclass
 
-SOURCE_NAMES = {"wb": "WB", "ozon": "Ozon"}
-# Где известно точное количество на складе. Ozon показывает только «есть / нет»,
-# поэтому у его товаров quantity условное: 1 — в наличии, 0 — нет
-EXACT_STOCK = {"wb"}
+# "ozon_card" — товары Ozon из поиска и магазина: каталог Ozon показывает цену
+# по карте Ozon, а не обычную, поэтому их цены храним отдельно от цен товаров
+# со страницы ("ozon"), чтобы не сравнивать одно с другим
+OZON_CARD = "ozon_card"
+SOURCE_NAMES = {"wb": "WB", "ozon": "Ozon", OZON_CARD: "Ozon"}
+# Где quantity — настоящее количество на складе (у WB всегда, у плиток Ozon —
+# когда Ozon пишет «N ед осталось»)
+EXACT_STOCK = {"wb", OZON_CARD}
+# «В наличии, но сколько — неизвестно» (страница товара Ozon показывает только есть/нет)
+UNKNOWN_STOCK = -1
 
 
 @dataclass(frozen=True)
@@ -33,7 +39,7 @@ class ProductInfo:
     name: str
     price: int | None      # самая низкая цена среди размеров, в копейках; None — нет в наличии
     old_price: int | None  # цена до скидки у того же размера, в копейках
-    quantity: int          # сколько штук в наличии всего (0 — нет в наличии)
+    quantity: int          # сколько штук в наличии (0 — нет; UNKNOWN_STOCK — есть, но сколько неизвестно)
     sizes: tuple[SizeInfo, ...] = ()  # по размерам; кортеж, т.к. объект неизменяемый
     # Для анализа рынка: кто продаёт и как товар оценивают
     seller: str = ""
@@ -45,7 +51,7 @@ class ProductInfo:
 
     @property
     def in_stock(self) -> bool:
-        return self.quantity > 0
+        return self.quantity != 0
 
     @property
     def has_sizes(self) -> bool:
