@@ -106,22 +106,24 @@ def _summary_sheet(sheet, tracking: Tracking, rows: list[ItemRow], tz: ZoneInfo,
 
     prices = [r.price / 100 for r in rows if r.price is not None]
     checked = max((r.checked_at for r in rows if r.checked_at), default=None)
+    # (подпись, значение, это деньги?) — формат «₽» задаём явно, а не по словам
+    # в подписи: так «Медиана цены» однажды осталась без рублей
     facts = [
-        ("Выгружено", exported_at),
-        ("Цены на момент проверки", to_local(checked, tz)),
-        ("Товаров", len(rows)),
-        ("В наличии", sum(1 for r in rows if r.price is not None)),
-        ("Минимальная цена", min(prices) if prices else None),
-        ("Средняя цена", round(statistics.mean(prices)) if prices else None),
+        ("Выгружено", exported_at, False),
+        ("Цены на момент проверки", to_local(checked, tz), False),
+        ("Товаров", len(rows), False),
+        ("В наличии", sum(1 for r in rows if r.price is not None), False),
+        ("Минимальная цена", min(prices) if prices else None, True),
+        ("Средняя цена", round(statistics.mean(prices)) if prices else None, True),
         # Медиана — «серединная» цена: половина товаров дешевле, половина дороже.
         # Не так сильно, как среднее, зависит от одного очень дорогого товара
-        ("Медиана цены", round(statistics.median(prices)) if prices else None),
-        ("Максимальная цена", max(prices) if prices else None),
+        ("Медиана цены", round(statistics.median(prices)) if prices else None, True),
+        ("Максимальная цена", max(prices) if prices else None, True),
     ]
-    for i, (label, value) in enumerate(facts, 3):
+    for i, (label, value, money) in enumerate(facts, 3):
         sheet.cell(row=i, column=1, value=label).font = Font(bold=True)
         cell = sheet.cell(row=i, column=2, value=value)
-        if "цена" in label.lower() and label != "Цены на момент проверки":
+        if money:
             cell.number_format = RUB
     note = sheet.cell(row=len(facts) + 3, column=1, value=(
         "Остаток — со склада, ближайшего к региону доставки. WB может ограничивать "

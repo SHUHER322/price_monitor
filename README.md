@@ -9,6 +9,31 @@
 **Стек:** Python 3.14, aiogram 3, httpx, Patchright (Chrome), SQLite (aiosqlite),
 APScheduler, openpyxl, matplotlib, pytest + GitHub Actions.
 
+## Как это выглядит
+
+<table>
+  <tr>
+    <th>Меню</th>
+    <th>Товар с размерами</th>
+    <th>Мои отслеживания</th>
+    <th>Карточка товара</th>
+    <th>Топ поиска</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/1_menu.png" width="200" alt="Меню бота"></td>
+    <td><img src="docs/screenshots/2_product.png" width="200" alt="Добавление товара"></td>
+    <td><img src="docs/screenshots/3_list.png" width="200" alt="Список отслеживаний"></td>
+    <td><img src="docs/screenshots/3_card.png" width="200" alt="Карточка товара"></td>
+    <td><img src="docs/screenshots/4_search.png" width="200" alt="Отслеживание поиска"></td>
+  </tr>
+</table>
+
+Выгрузка поиска «зимняя куртка» в Excel — сводка с продавцами в выдаче и все товары:
+
+![Excel: сводка](docs/screenshots/5_excel_summary.png)
+
+![Excel: товары](docs/screenshots/6_excel_items.png)
+
 ## Возможности
 
 **Что отслеживать** — выбирается кнопками в меню:

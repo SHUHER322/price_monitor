@@ -84,6 +84,14 @@ def test_helpers():
     assert export_filename(tracking(), NOW) == "поиск_стеклянный_коврик_2026-10-20.xlsx"
 
 
+def test_all_prices_in_summary_are_rubles():
+    sheet = open_book()["Сводка"]
+    formats = {sheet.cell(row=r, column=1).value: sheet.cell(row=r, column=2).number_format
+               for r in range(3, 11)}
+    for label in ("Минимальная цена", "Средняя цена", "Медиана цены", "Максимальная цена"):
+        assert "₽" in formats[label], label
+
+
 def test_stock_note_in_summary():
     sheet = open_book()["Сводка"]
     values = [c.value for row in sheet.iter_rows() for c in row if c.value]
