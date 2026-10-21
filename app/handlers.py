@@ -13,7 +13,7 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
-from .chart import build_price_chart, can_draw
+from .chart import build_price_chart, can_draw, checks_word
 from .checker import Checker, change_notes, find_changes
 from .config import Config
 from .db import Database
@@ -259,7 +259,7 @@ async def price_chart(callback: CallbackQuery, db: Database, config: Config) -> 
     png = build_price_chart(tracking.title, history, config.timezone, tracking.target_price)
     await callback.message.answer_photo(BufferedInputFile(png, filename="price.png"),
                                         caption=f"📈 {esc(tracking.title[:80])}: "
-                                                f"{len(history)} проверок")
+                                                f"{checks_word(len(history))}")
 
 
 @router.callback_query(F.data.startswith(TARGET_PREFIX))

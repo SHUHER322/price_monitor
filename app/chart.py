@@ -26,6 +26,16 @@ LINE = "#3ee6a8"
 TARGET = "#ffb454"
 
 MIN_POINTS = 2  # меньше — рисовать нечего
+MIN_SPAN = 0.05  # минимальный размах шкалы: ±5% от цены — ровная цена выглядит ровной
+
+
+def checks_word(count: int) -> str:
+    """1 проверка, 3 проверки, 5 проверок, 21 проверка, 12 проверок."""
+    if count % 10 == 1 and count % 100 != 11:
+        return f"{count} проверка"
+    if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+        return f"{count} проверки"
+    return f"{count} проверок"
 
 
 def _local(utc_text: str, tz: ZoneInfo) -> datetime:
@@ -63,7 +73,7 @@ def build_price_chart(title: str, points: list[PricePoint], tz: ZoneInfo,
                 textcoords="offset points", xytext=(6, 6), color="white",
                 fontsize=10, fontweight="bold")
     low_time, low = min(priced, key=lambda tp: tp[1].price)
-    if low is not last:
+    if low.price < last.price:   # минимум подписываем, только если он ниже текущей цены
         ax.annotate(f"мин {format_price(low.price)}", (low_time, low.price / 100),
                     textcoords="offset points", xytext=(0, -16), color=TEXT,
                     fontsize=9, ha="center")
@@ -76,6 +86,15 @@ def build_price_chart(title: str, points: list[PricePoint], tz: ZoneInfo,
     for spine in ax.spines.values():
         spine.set_visible(False)
     ax.margins(x=0.03, y=0.15)
+    # Если цена почти не менялась, не растягиваем шкалу «под микроскоп»
+    values = [p.price / 100 for _, p in priced]
+    low_value, high_value = min(values), max(values)
+    middle = (low_value + high_value) / 2
+    if high_value - low_value < middle * MIN_SPAN * 2:
+        bottom, top = middle * (1 - MIN_SPAN * 2), middle * (1 + MIN_SPAN * 2)
+        if target_price:   # линия цели должна остаться на графике
+            bottom = min(bottom, target_price / 100 * 0.97)
+        ax.set_ylim(bottom, top)
 
     fig.tight_layout()
     buffer = io.BytesIO()

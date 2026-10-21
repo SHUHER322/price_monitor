@@ -24,3 +24,21 @@ def test_can_draw_needs_two_prices():
     assert not can_draw([point("03:00", 300000)])
     assert not can_draw([point("03:00", 300000), point("09:00", None)])   # нет в наличии — не точка
     assert can_draw([point("03:00", 300000), point("09:00", 290000)])
+
+
+import pytest
+
+from app.chart import checks_word
+
+
+@pytest.mark.parametrize("count, text", [
+    (1, "1 проверка"), (3, "3 проверки"), (5, "5 проверок"), (11, "11 проверок"),
+    (12, "12 проверок"), (21, "21 проверка"), (24, "24 проверки"), (100, "100 проверок"),
+])
+def test_checks_word(count, text):
+    assert checks_word(count) == text
+
+
+def test_flat_price_chart_draws():
+    points = [point("03:00", 513700), point("09:00", 513700), point("15:00", 513700)]
+    assert build_price_chart("Куртка", points, TZ, 500000).startswith(PNG_SIGNATURE)
