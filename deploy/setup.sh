@@ -17,7 +17,9 @@ step "1/7 Системные пакеты"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 # xvfb — виртуальный экран: на сервере нет монитора, а Chrome нужен с окном
-apt-get install -y -q git curl ca-certificates xvfb xauth fonts-liberation fonts-dejavu-core
+# pipx — чтобы поставить uv с PyPI: сайт astral.sh с российских серверов не открывается
+apt-get install -y -q git curl ca-certificates xvfb xauth fonts-liberation fonts-dejavu-core \
+    pipx python3-venv
 
 step "2/7 Google Chrome"
 if ! command -v google-chrome >/dev/null; then
@@ -46,10 +48,16 @@ else
     as_app "git clone -q $REPO $APP_DIR"
 fi
 
-step "5/7 Python 3.14 и библиотеки"
-[ -x "$UV" ] || as_app "curl -LsSf https://astral.sh/uv/install.sh | sh"
-as_app "cd $APP_DIR && { [ -d .venv ] || $UV venv -q --python 3.14 .venv; } \
-        && $UV pip install -q -p .venv -r requirements.txt"
+step "5/7 Python и библиотеки"
+[ -x "$UV" ] || as_app "pipx install uv"
+if [ ! -x "$APP_DIR/.venv/bin/python" ]; then
+    # Python 3.14 uv качает с GitHub; если не вышло — системный Python 3.12 (бот работает и на нём)
+    if ! as_app "cd $APP_DIR && rm -rf .venv && UV_HTTP_TIMEOUT=120 $UV venv -q --python 3.14 .venv"; then
+        echo "Python 3.14 не скачался — беру системный: $(python3 -V)"
+        as_app "cd $APP_DIR && rm -rf .venv && $UV venv -q --python /usr/bin/python3 .venv"
+    fi
+fi
+as_app "cd $APP_DIR && UV_HTTP_TIMEOUT=120 $UV pip install -q -p .venv -r requirements.txt"
 as_app "$APP_DIR/.venv/bin/python --version"
 
 step "6/7 Настройки (.env)"
