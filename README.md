@@ -160,6 +160,20 @@ python -m app.main
 магазин на 100 товаров — до 1–2 минут. Окно закрывается само; трогать или закрывать
 его не нужно.
 
+### На сервере (Ubuntu 24.04)
+
+Chrome на сервере работает на виртуальном экране (Xvfb), бот — как служба systemd.
+Нужен сервер с российским IP (WB и Ozon) и 2 ГБ памяти. От root:
+
+```bash
+git clone https://github.com/SHUHER322/price_monitor
+bash price_monitor/deploy/setup.sh                    # пакеты, Chrome, Python 3.14, .env, служба
+bash /home/monitor/price_monitor/deploy/check.sh      # пускают ли WB и Ozon с этого IP
+systemctl start price-monitor                         # запуск; логи: journalctl -u price-monitor -f
+```
+
+Обновление кода: `bash price_monitor/deploy/setup.sh` ещё раз и `systemctl restart price-monitor`.
+
 ## Настройки (`.env`)
 
 | Параметр | По умолчанию | Что задаёт |

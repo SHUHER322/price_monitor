@@ -1,0 +1,20 @@
+# Служба systemd: бот работает в фоне и сам поднимается после сбоя или перезагрузки.
+# Устанавливается скриптом deploy/setup.sh. Команды:
+#     systemctl start|stop|restart|status price-monitor
+#     journalctl -u price-monitor -f        — логи в реальном времени
+[Unit]
+Description=Price Monitor — Telegram-бот мониторинга цен WB и Ozon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=monitor
+WorkingDirectory=/home/monitor/price_monitor
+# xvfb-run — виртуальный экран для Chrome (на сервере нет монитора)
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1366x900x24" /home/monitor/price_monitor/.venv/bin/python -m app.main
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
