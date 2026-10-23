@@ -21,3 +21,7 @@ run "app.sources.ozon 1291633069" && oz=OK || oz=ОШИБКА
 
 echo
 echo "Итог: WB — $wb, Ozon — $oz"
+if [ "$oz" != OK ]; then
+    echo "Ozon блокирует IP хостингов. Укажи прокси в $APP_DIR/.env:"
+    echo "  OZON_PROXY=http://логин:пароль@ip:порт   (резидентный или мобильный, российский IP)"
+fi

@@ -4,7 +4,8 @@ import pytest
 from app.config import load_config
 
 ENV_NAMES = ["BOT_TOKEN", "ALLOWED_USERS", "DB_PATH", "DATA_DIR", "CHECK_INTERVAL_HOURS",
-             "PRICE_DROP_PERCENT", "SEARCH_LIMIT", "SELLER_LIMIT", "MAX_TRACKINGS", "WB_DEST", "TIMEZONE"]
+             "PRICE_DROP_PERCENT", "SEARCH_LIMIT", "SELLER_LIMIT", "MAX_TRACKINGS", "WB_DEST", "TIMEZONE",
+             "OZON_PROXY"]
 
 
 @pytest.fixture
@@ -58,4 +59,26 @@ def test_required(env, name):
 def test_bad_values(env, name, value):
     env.setenv(name, value)
     with pytest.raises(RuntimeError, match=name):
+        load_config(use_dotenv=False)
+
+
+def test_no_ozon_proxy_by_default(env):
+    assert load_config(use_dotenv=False).ozon_proxy is None
+    env.setenv("OZON_PROXY", "   ")
+    assert load_config(use_dotenv=False).ozon_proxy is None
+
+
+def test_ozon_proxy_with_login(env):
+    env.setenv("OZON_PROXY", "http://user:p%40ss@1.2.3.4:8000")
+    assert load_config(use_dotenv=False).ozon_proxy == {
+        "server": "http://1.2.3.4:8000", "username": "user", "password": "p@ss"}
+    env.setenv("OZON_PROXY", "5.6.7.8:3128")           # без схемы — считаем http
+    assert load_config(use_dotenv=False).ozon_proxy == {"server": "http://5.6.7.8:3128"}
+
+
+@pytest.mark.parametrize("value", ["1.2.3.4", "ftp://1.2.3.4:21", "http://1.2.3.4:port",
+                                   "socks5://u:p@1.2.3.4:1080"])
+def test_bad_ozon_proxy(env, value):
+    env.setenv("OZON_PROXY", value)
+    with pytest.raises(RuntimeError, match="OZON_PROXY"):
         load_config(use_dotenv=False)

@@ -49,7 +49,7 @@ async def main() -> None:
     sources = {
         "wb": WBSource(data_dir / "wb_session.json", data_dir / "wb_browser_profile",
                        dest=config.wb_dest),
-        "ozon": OzonSource(data_dir / "ozon_browser_profile"),
+        "ozon": OzonSource(data_dir / "ozon_browser_profile", proxy=config.ozon_proxy),
     }
 
     # link_preview_is_disabled — без огромных превью ссылок в уведомлениях
@@ -96,6 +96,9 @@ async def main() -> None:
     except Exception as e:  # не критично: бот работает и без списка команд
         log.warning("Не удалось задать список команд: %s", e)
 
+    if config.ozon_proxy:
+        # Логин и пароль прокси в лог не пишем
+        log.info("Ozon — через прокси %s", config.ozon_proxy["server"])
     scheduler.start()
     log.info("Бот запущен. Пользователей с доступом: %d. Проверка цен каждые %d ч.",
              len(config.allowed_users), config.check_interval_hours)

@@ -317,9 +317,13 @@ def seller_name(data: dict) -> str:
 class OzonSource:
     name = SOURCE
 
-    def __init__(self, profile_dir: Path, pause: tuple[float, float] = (1.5, 3.5)):
+    def __init__(self, profile_dir: Path, pause: tuple[float, float] = (1.5, 3.5),
+                 proxy: dict | None = None):
+        """proxy — {"server", "username", "password"} для Chrome (см. OZON_PROXY в .env)
+        или None — напрямую. С сервера без прокси Ozon не пускает: блокирует IP хостингов."""
         self.profile_dir = profile_dir
         self.pause = pause
+        self.proxy = proxy
         # Один профиль браузера нельзя открыть дважды одновременно —
         # проверка по расписанию и кнопка «Обновить» ждут друг друга
         self._lock = asyncio.Lock()
@@ -331,9 +335,10 @@ class OzonSource:
         from patchright.async_api import async_playwright   # нужен только здесь
 
         async with self._lock, async_playwright() as p:
+            options = {"proxy": self.proxy} if self.proxy else {}
             context = await p.chromium.launch_persistent_context(
                 user_data_dir=str(self.profile_dir), channel="chrome",
-                headless=False, no_viewport=True)
+                headless=False, no_viewport=True, **options)
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(SITE + "/", wait_until="domcontentloaded", timeout=60_000)
@@ -442,7 +447,10 @@ class OzonSource:
 
 
 async def _demo(args: list[str]) -> None:
-    source = OzonSource(Path("data/ozon_browser_profile"))
+    from dotenv import load_dotenv
+    from ..config import parse_proxy
+    load_dotenv()   # прокси из .env (OZON_PROXY) — как у бота
+    source = OzonSource(Path("data/ozon_browser_profile"), proxy=parse_proxy("OZON_PROXY"))
     if args and args[0] in ("search", "seller"):
         products = (await source.search(" ".join(args[1:])) if args[0] == "search"
                     else await source.seller(args[1]))

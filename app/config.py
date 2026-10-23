@@ -1,6 +1,7 @@
 """Настройки из .env — с проверкой значений, чтобы ошибка в .env была видна сразу."""
 import os
 from dataclasses import dataclass
+from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
@@ -21,6 +22,9 @@ class Config:
     max_trackings: int          # сколько отслеживаний можно одному пользователю
     wb_dest: str                # регион доставки WB: от него зависят цены и наличие
     timezone: ZoneInfo          # в каком поясе показывать время пользователю
+    # Прокси для Chrome при запросах к Ozon (формат Playwright) или None — напрямую.
+    # Нужен на сервере: Ozon блокирует IP хостингов («Похоже, нет соединения»)
+    ozon_proxy: dict | None = None
 
 
 def _require(name: str) -> str:
@@ -71,6 +75,31 @@ def _parse_timezone(name: str) -> ZoneInfo:
                            "Пример: Asia/Tomsk, Europe/Moscow")
 
 
+def parse_proxy(name: str) -> dict | None:
+    """'http://user:pass@1.2.3.4:8000' → {"server": "http://1.2.3.4:8000",
+    "username": "user", "password": "pass"} — в таком виде прокси принимает Chrome
+    (Playwright). Пусто — None."""
+    value = os.getenv(name, "").strip()
+    if not value:
+        return None
+    parts = urlsplit(value if "://" in value else "http://" + value)
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if parts.scheme not in ("http", "https", "socks5") or not parts.hostname or not port:
+        raise RuntimeError(f"{name} — адрес прокси вида http://логин:пароль@1.2.3.4:8000, "
+                           f"сейчас: {value!r}")
+    if parts.scheme == "socks5" and parts.username:
+        raise RuntimeError(f"{name}: Chrome не умеет SOCKS5 с логином и паролем — "
+                           "используйте http-прокси")
+    proxy = {"server": f"{parts.scheme}://{parts.hostname}:{port}"}
+    if parts.username:
+        proxy["username"] = unquote(parts.username)
+        proxy["password"] = unquote(parts.password or "")
+    return proxy
+
+
 def load_config(use_dotenv: bool = True) -> Config:
     """use_dotenv=False — в тестах, чтобы не подхватить настоящий .env."""
     if use_dotenv:
@@ -88,4 +117,5 @@ def load_config(use_dotenv: bool = True) -> Config:
         max_trackings=_parse_int("MAX_TRACKINGS", 20, minimum=1),
         wb_dest=os.getenv("WB_DEST", "1259570991").strip(),
         timezone=_parse_timezone(os.getenv("TIMEZONE", "Asia/Tomsk")),
+        ozon_proxy=parse_proxy("OZON_PROXY"),
     )
